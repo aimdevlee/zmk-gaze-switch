@@ -46,9 +46,6 @@ jobs:
         env:
           P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
           P12_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: |
           KEYCHAIN=$RUNNER_TEMP/release.keychain-db
           KEYCHAIN_PASSWORD=$(openssl rand -hex 24)
@@ -68,16 +65,13 @@ jobs:
             awk '/Developer ID Application/ { print $2; exit }')
           [[ -n $IDENTITY ]] || { echo "No Developer ID Application identity in the certificate"; exit 1; }
 
-          xcrun notarytool store-credentials ci --keychain "$KEYCHAIN" \
-            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD"
-
-          {
-            echo "SIGN_IDENTITY=$IDENTITY"
-            echo "NOTARY_PROFILE=ci"
-            echo "NOTARY_KEYCHAIN=$KEYCHAIN"
-          } >> "$GITHUB_ENV"
+          echo "SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
 
       - name: Build, sign and notarize
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: app/release.sh
 
       - name: Attach to the release

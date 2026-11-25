@@ -7,16 +7,22 @@
 #   NOTARY_PROFILE=<name> \     # once: xcrun notarytool store-credentials <name>
 #   ./release.sh
 #
-# Optional: NOTARY_KEYCHAIN=<path>, when the profile is not in the login keychain.
+# Without NOTARY_PROFILE it signs in to the notary service with APPLE_ID,
+# APPLE_TEAM_ID and APPLE_APP_PASSWORD, which is what CI does.
 set -euo pipefail
 cd "$(dirname "$0")"
 
 : "${VERSION:?set VERSION}"
 : "${SIGN_IDENTITY:?set SIGN_IDENTITY}"
-: "${NOTARY_PROFILE:?set NOTARY_PROFILE}"
 
-NOTARY=(--keychain-profile "$NOTARY_PROFILE")
-if [[ -n ${NOTARY_KEYCHAIN:-} ]]; then NOTARY+=(--keychain "$NOTARY_KEYCHAIN"); fi
+if [[ -n ${NOTARY_PROFILE:-} ]]; then
+  NOTARY=(--keychain-profile "$NOTARY_PROFILE")
+else
+  : "${APPLE_ID:?set NOTARY_PROFILE, or APPLE_ID, APPLE_TEAM_ID and APPLE_APP_PASSWORD}"
+  : "${APPLE_TEAM_ID:?set APPLE_TEAM_ID}"
+  : "${APPLE_APP_PASSWORD:?set APPLE_APP_PASSWORD}"
+  NOTARY=(--apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD")
+fi
 
 mkdir -p dist
 APP=dist/GazeSwitch.app
