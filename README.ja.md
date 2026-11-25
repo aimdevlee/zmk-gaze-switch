@@ -76,9 +76,15 @@ screen /dev/cu.usbmodemXXXX 115200
 `B1` で BLE プロファイル 1 に、`U` で USB に切り替わることを確認してください。
 (`screen` の終了: `Ctrl-A` のあと `K`、`y`)
 
-## 3. GazeSwitch のビルドと起動
+## 3. GazeSwitch のインストール
 
-macOS 13 以降と Xcode コマンドラインツールが必要です。
+[最新のリリース](https://github.com/aimdevlee/zmk-gaze-switch/releases/latest)から `GazeSwitch-x.y.z.zip` をダウンロードして展開し、`GazeSwitch.app` を
+アプリケーションフォルダに移して開きます。macOS 13 以降が必要で、Apple シリコンと Intel のどちらの Mac でも動きます。
+署名と公証を済ませたアプリなので、警告なしで開けます。
+
+### 自分でビルドする
+
+Xcode コマンドラインツールが必要です。
 
 ```bash
 cd app && ./bundle.sh

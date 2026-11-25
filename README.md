@@ -76,9 +76,15 @@ Type `?` and Enter. A reply like `ZMK-HOS 1 U 1 1` means this is the switch port
 Check that `B1` selects BLE profile 1 and `U` goes back to USB.
 (To quit `screen`: `Ctrl-A`, then `K`, `y`.)
 
-## 3. Build and run GazeSwitch
+## 3. Install GazeSwitch
 
-Requires macOS 13 or later and the Xcode command line tools.
+Download `GazeSwitch-x.y.z.zip` from the [latest release](https://github.com/aimdevlee/zmk-gaze-switch/releases/latest), unzip it, move `GazeSwitch.app`
+to Applications and open it. It needs macOS 13 or later and runs on both Apple silicon and Intel Macs.
+The app is signed and notarized, so it opens without a warning.
+
+### Or build it yourself
+
+Requires the Xcode command line tools.
 
 ```bash
 cd app && ./bundle.sh
