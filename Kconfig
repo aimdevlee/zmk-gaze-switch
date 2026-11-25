@@ -1,0 +1,17 @@
+config ZMK_HOST_OUTPUT_SWITCH
+    bool "Let the host switch the output (USB / BLE profile) over a USB serial port"
+    depends on ZMK_USB && ZMK_BLE
+    depends on UART_INTERRUPT_DRIVEN && UART_LINE_CTRL
+    select RING_BUFFER
+    help
+      Adds a line protocol on a dedicated CDC ACM port (chosen node
+      zmk,host-output-switch-uart):
+        U      select the USB output
+        B      select the BLE output (current profile)
+        B<n>   select BLE profile n, then the BLE output
+        ?      report state only
+      Every command answers with one line:
+        ZMK-HOS 1 <U|B> <profile> <ble-connected 0|1>
+      or ZMK-HOS 1 ERR when it was rejected (e.g. profile out of range).
+
+      On a split keyboard enable this on the central half only.

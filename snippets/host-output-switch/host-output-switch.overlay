@@ -1,0 +1,20 @@
+/*
+ * A CDC ACM port used only by src/host_output_switch.c.
+ *
+ * When combined with studio-rpc-usb-uart, list that snippet first so the
+ * Studio port keeps the first interface. Anything else that assumes a single
+ * CDC ACM port (e.g. a 1200-baud bootloader trigger) must be pointed at the
+ * port it should watch in your own overlay.
+ */
+
+/ {
+    chosen {
+        zmk,host-output-switch-uart = &host_output_switch_uart;
+    };
+};
+
+&zephyr_udc0 {
+    host_output_switch_uart: host_output_switch_uart {
+        compatible = "zephyr,cdc-acm-uart";
+    };
+};

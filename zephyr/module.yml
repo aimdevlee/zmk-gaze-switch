@@ -1,0 +1,6 @@
+name: zmk-gaze-switch
+build:
+  cmake: .
+  kconfig: Kconfig
+  settings:
+    snippet_root: .

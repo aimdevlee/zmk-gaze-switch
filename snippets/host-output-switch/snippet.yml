@@ -1,0 +1,4 @@
+name: host-output-switch
+append:
+  EXTRA_CONF_FILE: host-output-switch.conf
+  EXTRA_DTC_OVERLAY_FILE: host-output-switch.overlay
