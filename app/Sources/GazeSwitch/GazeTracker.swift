@@ -72,7 +72,7 @@ final class GazeTracker: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate 
             if !configured { try? configure() }
         }
         guard configured else { throw NSError(domain: "GazeSwitch", code: 1,
-                                               userInfo: [NSLocalizedDescriptionKey: "카메라를 찾지 못했어요"]) }
+                                               userInfo: [NSLocalizedDescriptionKey: tr("카메라를 찾지 못했어요", "No camera found", "カメラが見つかりません")]) }
         queue.async { if !self.session.isRunning { self.session.startRunning() } }
     }
 

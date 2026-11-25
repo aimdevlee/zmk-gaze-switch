@@ -68,7 +68,9 @@ final class KeyboardLink {
                 notify(true, state)
             case .error:
                 let callback = onError
-                DispatchQueue.main.async { callback?("키보드가 '\(command)' 명령을 거부했어요 (프로필 번호를 확인하세요)") }
+                DispatchQueue.main.async { callback?(tr("키보드가 '\(command)' 명령을 거부했어요 (프로필 번호를 확인하세요)",
+                                                          "The keyboard rejected the '\(command)' command (check the profile number)",
+                                                          "キーボードが「\(command)」コマンドを拒否しました(プロファイル番号を確認してください)")) }
             case nil:
                 dropLocked()
             }

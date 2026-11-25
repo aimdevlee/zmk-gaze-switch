@@ -101,7 +101,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         GazeTracker.requestAccess { [weak self] granted in
             guard let self else { return }
             guard granted else {
-                self.cameraError = "카메라 권한이 없어요 (시스템 설정 > 개인정보 보호 및 보안 > 카메라)"
+                self.cameraError = tr("카메라 권한이 없어요 (시스템 설정 > 개인정보 보호 및 보안 > 카메라)",
+                                      "No camera access (System Settings > Privacy & Security > Camera)",
+                                      "カメラの許可がありません(システム設定 > プライバシーとセキュリティ > カメラ)")
                 self.refreshIcon()
                 return
             }
@@ -149,7 +151,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         GazeTracker.requestAccess { [weak self] granted in
             guard let self else { return }
             guard granted else {
-                self.alert("카메라 권한이 필요해요. 시스템 설정 > 개인정보 보호 및 보안 > 카메라에서 GazeSwitch를 허용해 주세요.")
+                self.alert(tr("카메라 권한이 필요해요. 시스템 설정 > 개인정보 보호 및 보안 > 카메라에서 GazeSwitch를 허용해 주세요.",
+                              "Camera access is needed. Allow GazeSwitch in System Settings > Privacy & Security > Camera.",
+                              "カメラの許可が必要です。システム設定 > プライバシーとセキュリティ > カメラで GazeSwitch を許可してください。"))
                 return
             }
             let session = CalibrationSession()
@@ -174,7 +178,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let result else { return }  // cancelled: keep the previous calibration
 
         guard let mac = TargetStats(samples: result.mac), let other = TargetStats(samples: result.other) else {
-            alert("얼굴을 충분히 인식하지 못해서 보정을 저장하지 않았어요. 밝은 곳에서 다시 해 주세요.")
+            alert(tr("얼굴을 충분히 인식하지 못해서 보정을 저장하지 않았어요. 밝은 곳에서 다시 해 주세요.",
+                     "The face was not detected well enough, so the calibration was not saved. Please try again somewhere brighter.",
+                     "顔を十分に検出できなかったため、キャリブレーションを保存しませんでした。明るい場所でもう一度お試しください。"))
             return
         }
         macStats = mac
@@ -186,10 +192,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         var lines: [String] = []
         if let model = classifier.model {
             let total = model.totalSeparation(useEyes: useEyes)
-            lines.append(String(format: "구분력 %.1f — %@", total,
-                                total >= 3 ? "충분해요." : total >= 2 ? "쓸 만해요." : "낮아요. 전환이 불안정할 수 있어요."))
+            lines.append(String(format: tr("구분력 %.1f — %@", "Separation %.1f — %@", "分離度 %.1f — %@"), total,
+                                total >= 3 ? tr("충분해요.", "plenty.", "十分です。")
+                                : total >= 2 ? tr("쓸 만해요.", "good enough.", "使える範囲です。")
+                                : tr("낮아요. 전환이 불안정할 수 있어요.", "low. Switching may be unreliable.", "低いです。切り替えが不安定になるかもしれません。")))
             if useEyes && !model.hasEyes {
-                lines.append("눈 위치를 믿을 수 있게 잡지 못해서 고개 방향만 사용합니다. 마스크를 쓰고 있거나 얼굴 일부가 가려져 있으면 이렇게 돼요.")
+                lines.append(tr("눈 위치를 믿을 수 있게 잡지 못해서 고개 방향만 사용합니다. 마스크를 쓰고 있거나 얼굴 일부가 가려져 있으면 이렇게 돼요.",
+                                "The eyes could not be located reliably, so only head direction is used. This happens with a mask on or when part of the face is covered.",
+                                "目の位置を確実に検出できなかったため、頭の向きだけを使います。マスクを着けているときや顔の一部が隠れているときにこうなります。"))
             }
         }
         if let model = classifier.model {
@@ -200,14 +210,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 let right = scores.filter { ($0 > 0) == (group.target == .other) }.count
                 return String(format: "%@  %d%%", group.name, right * 100 / scores.count)
             }
-            lines.append("자세별 정확도\n" + report.joined(separator: "\n"))
+            lines.append(tr("자세별 정확도", "Accuracy by posture", "姿勢ごとの正解率") + "\n" + report.joined(separator: "\n"))
         }
         writeLog(result)
         if !result.weakSteps.isEmpty {
-            lines.append("얼굴이 잘 안 잡힌 단계: " + result.weakSteps.joined(separator: ", ")
-                         + ". 그 자세에서는 판단이 덜 정확할 수 있어요.")
+            lines.append(tr("얼굴이 잘 안 잡힌 단계: ", "Steps where the face was mostly lost: ", "顔をうまく検出できなかったステップ: ")
+                         + result.weakSteps.joined(separator: ", ")
+                         + tr(". 그 자세에서는 판단이 덜 정확할 수 있어요.", ". Decisions may be less accurate in those postures.", "。その姿勢では判定の精度が下がるかもしれません。"))
         }
-        alert("보정을 마쳤어요.\n\n" + lines.joined(separator: "\n\n"))
+        alert(tr("보정을 마쳤어요.", "Calibration finished.", "キャリブレーションが終わりました。") + "\n\n" + lines.joined(separator: "\n\n"))
     }
 
     /// Raw frames of the last calibration, for tuning. Numbers only, no images.
@@ -246,30 +257,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: - Live menu rows
 
     private var keyboardText: String {
-        guard let state = keyboardState else { return "키보드: 찾는 중… (오른쪽 반쪽을 USB로 연결)" }
-        let out = state.usb ? "USB (이 맥)" : "BLE 프로필 \(state.profile)" + (state.bleConnected ? "" : " · 연결 안 됨")
-        return "키보드: \(out)"
+        guard let state = keyboardState else {
+            return tr("키보드: 찾는 중… (키보드를 USB로 연결하세요)",
+                      "Keyboard: searching… (plug the keyboard in over USB)",
+                      "キーボード: 検索中…(キーボードを USB で接続してください)")
+        }
+        let out = state.usb
+            ? tr("USB (이 맥)", "USB (this Mac)", "USB(この Mac)")
+            : tr("BLE 프로필 \(state.profile)", "BLE profile \(state.profile)", "BLE プロファイル \(state.profile)")
+                + (state.bleConnected ? "" : tr(" · 연결 안 됨", " · not connected", " · 未接続"))
+        return tr("키보드: ", "Keyboard: ", "キーボード: ") + out
     }
 
     private var faceText: String {
-        lastPose.map { String(format: "얼굴: 좌우 %.0f° · 상하 %.0f°", $0.yaw, $0.pitch) }
-            ?? "얼굴: 인식 안 됨 (현재 상태 유지)"
+        lastPose.map { String(format: tr("얼굴: 좌우 %.0f° · 상하 %.0f°", "Face: L/R %.0f° · U/D %.0f°", "顔: 左右 %.0f° · 上下 %.0f°"),
+                                 $0.yaw, $0.pitch) }
+            ?? tr("얼굴: 인식 안 됨 (현재 상태 유지)", "Face: not detected (keeping the current output)", "顔: 検出なし(現在の出力を維持)")
     }
 
     private var eyeText: String {
-        guard let pose = lastPose else { return "눈동자: –" }
-        return pose.irisX.map { String(format: "눈동자: 좌우 %+.2f · 상하 %+.2f", $0, pose.irisY ?? 0) }
-            ?? "눈동자: 인식 안 됨 — 마스크 등으로 얼굴이 가려졌을 수 있어요 (고개 방향만 사용)"
+        guard let pose = lastPose else { return tr("눈동자: –", "Eyes: –", "瞳: –") }
+        return pose.irisX.map { String(format: tr("눈동자: 좌우 %+.2f · 상하 %+.2f", "Eyes: L/R %+.2f · U/D %+.2f", "瞳: 左右 %+.2f · 上下 %+.2f"),
+                                       $0, pose.irisY ?? 0) }
+            ?? tr("눈동자: 인식 안 됨 — 마스크 등으로 얼굴이 가려졌을 수 있어요 (고개 방향만 사용)",
+                  "Eyes: not detected — the face may be covered, e.g. by a mask (using head direction only)",
+                  "瞳: 検出なし — マスクなどで顔が隠れているかもしれません(頭の向きだけを使用)")
     }
 
     /// The model's verdict for the latest frame, drawn as a little gauge.
     private var scoreText: String {
-        guard let score = classifier.lastScore else { return "판단: –" }
+        guard let score = classifier.lastScore else { return tr("판단: –", "Verdict: –", "判定: –") }
         let slots = 11
         let clamped = min(max(score, -0.75), 0.75)
         let pos = Int(((clamped + 0.75) / 1.5 * Double(slots - 1)).rounded())
         let gauge = (0..<slots).map { $0 == pos ? "●" : ($0 == slots / 2 ? "┼" : "─") }.joined()
-        return String(format: "판단: 맥 %@ 다른  (%+.2f)", gauge, score)
+        return String(format: tr("판단: 맥 %@ 다른  (%+.2f)", "Verdict: Mac %@ other  (%+.2f)", "判定: Mac %@ もう一台  (%+.2f)"), gauge, score)
     }
 
     /// Updates the live rows of an open menu; menu tracking runs the main
@@ -324,7 +346,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let cameraError {
             info(cameraError)
         } else if enabled && !calibrated {
-            info("자동 전환은 보정을 마친 뒤 켜져요")
+            info(tr("자동 전환은 보정을 마친 뒤 켜져요", "Automatic switching turns on after calibration", "自動切り替えはキャリブレーション後に有効になります"))
         } else if autoSwitching {
             scoreRow = info(scoreText)
             faceRow = info(faceText)
@@ -332,35 +354,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         menu.addItem(.separator())
 
-        action("시선으로 자동 전환") { [weak self] in
+        action(tr("시선으로 자동 전환", "Switch automatically by gaze", "視線で自動切り替え")) { [weak self] in
             guard let self else { return }
             self.enabled.toggle()
             self.applyEnabled()
         }.state = enabled ? .on : .off
-        action("눈동자 방향도 사용") { [weak self] in self?.useEyes.toggle() }.state = useEyes ? .on : .off
-        action("지금 이 맥으로") { [weak self] in self?.switchManually(to: .mac) }
-        action("지금 다른 컴퓨터로") { [weak self] in self?.switchManually(to: .other) }
+        action(tr("눈동자 방향도 사용", "Also use eye direction", "瞳の向きも使う")) { [weak self] in self?.useEyes.toggle() }.state = useEyes ? .on : .off
+        action(tr("지금 이 맥으로", "Switch to this Mac now", "今すぐこの Mac へ")) { [weak self] in self?.switchManually(to: .mac) }
+        action(tr("지금 다른 컴퓨터로", "Switch to the other computer now", "今すぐもう一台へ")) { [weak self] in self?.switchManually(to: .other) }
         menu.addItem(.separator())
 
         if let model = classifier.model {
-            info(String(format: "보정됨 · 구분력 %.1f (2 이상이면 안정적)", model.totalSeparation(useEyes: useEyes)))
+            info(String(format: tr("보정됨 · 구분력 %.1f (2 이상이면 안정적)", "Calibrated · separation %.1f (2 or more is reliable)", "キャリブレーション済み · 分離度 %.1f(2 以上なら安定)"), model.totalSeparation(useEyes: useEyes)))
             // Each signal on its own; the total above uses them in combination.
             let parts = Feature.allCases.compactMap { f -> String? in
                 guard !f.isEye || useEyes, let sep = model.separation(f) else { return nil }
                 return String(format: "%@ %.1f", f.label, sep)
             }
-            info("신호별: " + parts.joined(separator: " · "))
+            info(tr("신호별: ", "Per signal: ", "信号ごと: ") + parts.joined(separator: " · "))
             if useEyes && !model.hasEyes {
-                info("눈동자가 보정 중에 잘 안 잡혀서 고개 방향만 쓰고 있어요")
+                info(tr("눈동자가 보정 중에 잘 안 잡혀서 고개 방향만 쓰고 있어요", "Eyes were not detected well during calibration; using head direction only", "キャリブレーション中に瞳をうまく検出できなかったため、頭の向きだけを使っています"))
             }
         } else {
-            info("보정 안 됨")
+            info(tr("보정 안 됨", "Not calibrated", "未キャリブレーション"))
         }
-        action(calibrated ? "다시 보정 (화면 안내, 약 1분)" : "보정 시작 (화면 안내, 약 1분)") { [weak self] in
+        action(calibrated ? tr("다시 보정 (화면 안내, 약 1분)", "Recalibrate (on-screen guide, about 1 minute)", "再キャリブレーション(画面の案内、約 1 分)")
+                          : tr("보정 시작 (화면 안내, 약 1분)", "Start calibration (on-screen guide, about 1 minute)", "キャリブレーション開始(画面の案内、約 1 分)")) { [weak self] in
             self?.startCalibration()
         }
         if calibrated {
-            action("보정 초기화") { [weak self] in
+            action(tr("보정 초기화", "Reset calibration", "キャリブレーションをリセット")) { [weak self] in
                 guard let self else { return }
                 self.macStats = nil
                 self.otherStats = nil
@@ -372,12 +395,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         menu.addItem(.separator())
 
-        let profileItem = NSMenuItem(title: "다른 컴퓨터의 BLE 프로필", action: nil, keyEquivalent: "")
+        let profileItem = NSMenuItem(title: tr("다른 컴퓨터의 BLE 프로필", "BLE profile of the other computer", "もう一台の BLE プロファイル"), action: nil, keyEquivalent: "")
         let sub = NSMenu()
         // ZMK's default of five BLE profiles. A split central may have fewer;
         // the keyboard answers ERR for one it doesn't have.
         for n in 0..<5 {
-            let item = ClosureMenuItem(title: "프로필 \(n)", keyEquivalent: "") { [weak self] in
+            let item = ClosureMenuItem(title: tr("프로필 \(n)", "Profile \(n)", "プロファイル \(n)"), keyEquivalent: "") { [weak self] in
                 self?.profile = n
                 if self?.classifier.current == .other { self?.send(.other) }
             }
@@ -386,9 +409,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         profileItem.submenu = sub
         menu.addItem(profileItem)
+
+        let languageItem = NSMenuItem(title: tr("언어", "Language", "言語"), action: nil, keyEquivalent: "")
+        let languages = NSMenu()
+        let automatic = ClosureMenuItem(title: tr("시스템 설정 따르기", "Follow the system", "システム設定に合わせる"),
+                                        keyEquivalent: "") { Language.chosen = nil }
+        automatic.state = Language.chosen == nil ? .on : .off
+        languages.addItem(automatic)
+        languages.addItem(.separator())
+        for language in Language.allCases {
+            let item = ClosureMenuItem(title: language.displayName, keyEquivalent: "") { Language.chosen = language }
+            item.state = Language.chosen == language ? .on : .off
+            languages.addItem(item)
+        }
+        languageItem.submenu = languages
+        menu.addItem(languageItem)
         menu.addItem(.separator())
 
-        action("종료", "q") { NSApp.terminate(nil) }
+        action(tr("종료", "Quit", "終了"), "q") { NSApp.terminate(nil) }
     }
 
     private func alert(_ text: String) {

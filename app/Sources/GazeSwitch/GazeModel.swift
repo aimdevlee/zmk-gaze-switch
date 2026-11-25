@@ -13,12 +13,12 @@ enum Feature: Int, CaseIterable {
 
     var label: String {
         switch self {
-        case .headYaw: return "고개 좌우"
-        case .headPitch: return "고개 상하"
-        case .eyeX: return "눈 좌우"
-        case .eyeY: return "눈 상하"
-        case .irisX: return "홍채 좌우"
-        case .irisY: return "홍채 상하"
+        case .headYaw: return tr("고개 좌우", "head L/R", "頭 左右")
+        case .headPitch: return tr("고개 상하", "head U/D", "頭 上下")
+        case .eyeX: return tr("눈 좌우", "pupil L/R", "瞳 左右")
+        case .eyeY: return tr("눈 상하", "pupil U/D", "瞳 上下")
+        case .irisX: return tr("홍채 좌우", "iris L/R", "虹彩 左右")
+        case .irisY: return tr("홍채 상하", "iris U/D", "虹彩 上下")
         }
     }
 

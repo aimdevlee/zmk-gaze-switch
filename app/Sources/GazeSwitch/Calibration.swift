@@ -29,21 +29,55 @@ final class CalibrationSession: NSObject, AVSpeechSynthesizerDelegate {
         var groups: [(name: String, target: Target, samples: [HeadPose])] = []
     }
 
-    static let steps: [Step] = [
-        // Looking at the MacBook
-        Step(target: .mac, name: "맥북·평소처럼", instruction: "평소처럼 편하게, 화면의 점을 보세요.", dot: CGPoint(x: 0.5, y: 0.42)),
-        Step(target: .mac, name: "맥북·평소처럼", dot: CGPoint(x: 0.08, y: 0.42)),
-        Step(target: .mac, name: "맥북·평소처럼", dot: CGPoint(x: 0.92, y: 0.42)),
-        Step(target: .mac, name: "맥북·눈만 움직이기", instruction: "고개는 화면 정면에 고정하고, 눈만 움직여 점을 따라가세요.", dot: CGPoint(x: 0.06, y: 0.9)),
-        Step(target: .mac, name: "맥북·눈만 움직이기", dot: CGPoint(x: 0.94, y: 0.9)),
-        Step(target: .mac, name: "맥북·눈만 움직이기", dot: CGPoint(x: 0.5, y: 0.08)),
-        Step(target: .mac, name: "맥북·고개는 다른 쪽", instruction: "고개를 다른 컴퓨터 쪽으로 돌린 채, 눈으로만 이 점을 보세요.", dot: CGPoint(x: 0.5, y: 0.42), collect: 3),
-        // Looking at the other computer
-        Step(target: .other, name: "다른 컴퓨터·평소처럼", instruction: "이제 평소처럼 편하게, 다른 컴퓨터 화면의 가운데를 보세요.", collect: 3),
-        Step(target: .other, name: "다른 컴퓨터·양 끝", instruction: "다른 컴퓨터 화면의 왼쪽 끝과 오른쪽 끝을 천천히 번갈아 보세요.", collect: 4),
-        Step(target: .other, name: "다른 컴퓨터·눈만 움직이기", instruction: "고개는 맥북 정면에 두고, 눈만 돌려서 다른 컴퓨터 화면을 보세요. 가능한 만큼만 하면 됩니다.", collect: 3),
-        Step(target: .other, name: "다른 컴퓨터·고개 완전히", instruction: "고개를 다른 컴퓨터 쪽으로 완전히 돌려서 화면을 보세요.", collect: 3),
-    ]
+    /// Built on each use, so the steps follow the current language.
+    static var steps: [Step] {
+        let macNatural = tr("맥북·평소처럼", "MacBook · natural", "MacBook・普段どおり")
+        let macEyes = tr("맥북·눈만 움직이기", "MacBook · eyes only", "MacBook・目だけ動かす")
+        let macTurned = tr("맥북·고개는 다른 쪽", "MacBook · head turned away", "MacBook・頭は別のほう")
+        return [
+            // Looking at the MacBook
+            Step(target: .mac, name: macNatural,
+                 instruction: tr("평소처럼 편하게, 화면의 점을 보세요.",
+                                 "Sit as you normally do and look at the dot on the screen.",
+                                 "普段どおり楽な姿勢で、画面の点を見てください。"),
+                 dot: CGPoint(x: 0.5, y: 0.42)),
+            Step(target: .mac, name: macNatural, dot: CGPoint(x: 0.08, y: 0.42)),
+            Step(target: .mac, name: macNatural, dot: CGPoint(x: 0.92, y: 0.42)),
+            Step(target: .mac, name: macEyes,
+                 instruction: tr("고개는 화면 정면에 고정하고, 눈만 움직여 점을 따라가세요.",
+                                 "Keep your head facing the screen and follow the dot with your eyes only.",
+                                 "頭は画面の正面に向けたまま、目だけで点を追ってください。"),
+                 dot: CGPoint(x: 0.06, y: 0.9)),
+            Step(target: .mac, name: macEyes, dot: CGPoint(x: 0.94, y: 0.9)),
+            Step(target: .mac, name: macEyes, dot: CGPoint(x: 0.5, y: 0.08)),
+            Step(target: .mac, name: macTurned,
+                 instruction: tr("고개를 다른 컴퓨터 쪽으로 돌린 채, 눈으로만 이 점을 보세요.",
+                                 "Turn your head toward the other computer, and look at this dot with your eyes only.",
+                                 "頭をもう一台のコンピュータのほうへ向けたまま、目だけでこの点を見てください。"),
+                 dot: CGPoint(x: 0.5, y: 0.42), collect: 3),
+            // Looking at the other computer
+            Step(target: .other, name: tr("다른 컴퓨터·평소처럼", "Other computer · natural", "もう一台・普段どおり"),
+                 instruction: tr("이제 평소처럼 편하게, 다른 컴퓨터 화면의 가운데를 보세요.",
+                                 "Now sit as you normally do and look at the middle of the other computer's screen.",
+                                 "今度は普段どおり楽な姿勢で、もう一台のコンピュータの画面の中央を見てください。"),
+                 collect: 3),
+            Step(target: .other, name: tr("다른 컴퓨터·양 끝", "Other computer · both edges", "もう一台・両端"),
+                 instruction: tr("다른 컴퓨터 화면의 왼쪽 끝과 오른쪽 끝을 천천히 번갈아 보세요.",
+                                 "Slowly look back and forth between the left and right edges of the other computer's screen.",
+                                 "もう一台のコンピュータの画面の左端と右端を、ゆっくり交互に見てください。"),
+                 collect: 4),
+            Step(target: .other, name: tr("다른 컴퓨터·눈만 움직이기", "Other computer · eyes only", "もう一台・目だけ動かす"),
+                 instruction: tr("고개는 맥북 정면에 두고, 눈만 돌려서 다른 컴퓨터 화면을 보세요. 가능한 만큼만 하면 됩니다.",
+                                 "Keep your head facing the MacBook and look at the other computer's screen with your eyes only. Go only as far as is comfortable.",
+                                 "頭は MacBook の正面に向けたまま、目だけでもう一台のコンピュータの画面を見てください。無理のない範囲でかまいません。"),
+                 collect: 3),
+            Step(target: .other, name: tr("다른 컴퓨터·고개 완전히", "Other computer · head fully turned", "もう一台・頭を完全に向ける"),
+                 instruction: tr("고개를 다른 컴퓨터 쪽으로 완전히 돌려서 화면을 보세요.",
+                                 "Turn your head fully toward the other computer and look at its screen.",
+                                 "頭をもう一台のコンピュータのほうへ完全に向けて、画面を見てください。"),
+                 collect: 3),
+        ]
+    }
 
     /// nil when the user cancelled.
     var onFinish: ((Result?) -> Void)?
@@ -52,6 +86,8 @@ final class CalibrationSession: NSObject, AVSpeechSynthesizerDelegate {
 
     private enum Phase { case announcing, settling, collecting }
 
+    /// Fixed for the whole session, even if the language changes meanwhile.
+    private let steps = CalibrationSession.steps
     private var index = 0
     private var token = 0
     private var phase = Phase.announcing
@@ -59,7 +95,7 @@ final class CalibrationSession: NSObject, AVSpeechSynthesizerDelegate {
     private var result = Result(mac: [], other: [], weakSteps: [])
 
     private let synth = AVSpeechSynthesizer()
-    private let voice = AVSpeechSynthesisVoice(language: "ko-KR")
+    private let voice = AVSpeechSynthesisVoice(language: Language.current.voiceCode)
     private var window: OverlayWindow?
     private var view: OverlayView?
 
@@ -90,12 +126,12 @@ final class CalibrationSession: NSObject, AVSpeechSynthesizerDelegate {
     }
 
     private func runStep() {
-        guard index < Self.steps.count else { return finish() }
-        let step = Self.steps[index]
+        guard index < steps.count else { return finish() }
+        let step = steps[index]
         token += 1
         let t = token
         phase = .announcing
-        view?.show(step, number: index + 1, of: Self.steps.count)
+        view?.show(step, number: index + 1, of: steps.count)
 
         guard let instruction = step.instruction else {
             // Same posture, new dot: just give the eyes time to get there.
@@ -108,7 +144,7 @@ final class CalibrationSession: NSObject, AVSpeechSynthesizerDelegate {
             synth.speak(utterance)
             after(12, t) { self.beginSettle(t) }  // in case the finish callback never comes
         } else {
-            after(3.5, t) { self.beginSettle(t) }  // no Korean voice installed: reading time
+            after(3.5, t) { self.beginSettle(t) }  // no voice for this language installed: reading time
         }
     }
 
@@ -133,12 +169,12 @@ final class CalibrationSession: NSObject, AVSpeechSynthesizerDelegate {
         stepSamples = []
         NSSound(named: "Tink")?.play()
         view?.setCollecting(true)
-        onRecording?(String(format: "s%02d-%@", index + 1, Self.steps[index].target.rawValue))
-        after(Self.steps[index].collect, t) { self.endCollect() }
+        onRecording?(String(format: "s%02d-%@", index + 1, steps[index].target.rawValue))
+        after(steps[index].collect, t) { self.endCollect() }
     }
 
     private func endCollect() {
-        let step = Self.steps[index]
+        let step = steps[index]
         phase = .announcing
         view?.setCollecting(false)
         onRecording?(nil)
@@ -219,7 +255,7 @@ private final class OverlayView: NSView {
     private let title = NSTextField(wrappingLabelWithString: "")
     private let status = NSTextField(labelWithString: "")
     private let progress = NSTextField(labelWithString: "")
-    private let cancelButton = NSButton(title: "취소 (Esc)", target: nil, action: nil)
+    private let cancelButton = NSButton(title: tr("취소 (Esc)", "Cancel (Esc)", "キャンセル (Esc)"), target: nil, action: nil)
     private let dot = CALayer()
     private let ring = CALayer()
 
@@ -290,13 +326,19 @@ private final class OverlayView: NSView {
         ring.isHidden = dotPosition == nil
 
         if !faceVisible {
-            status.stringValue = "얼굴이 안 보여요 — 카메라에 얼굴이 잡히는 범위에서만 돌려 주세요"
+            status.stringValue = tr("얼굴이 안 보여요 — 카메라에 얼굴이 잡히는 범위에서만 돌려 주세요",
+                                    "Face not visible — turn only as far as the camera can still see your face",
+                                    "顔が見えません — カメラに顔が映る範囲で向きを変えてください")
             status.textColor = .systemRed
         } else if collecting {
-            status.stringValue = lookingAway ? "● 기록 중 — 그대로 유지 (톡 소리가 날 때까지)" : "● 기록 중 — 점을 계속 보세요"
+            status.stringValue = lookingAway
+                ? tr("● 기록 중 — 그대로 유지 (톡 소리가 날 때까지)", "● Recording — hold still until the pop sound", "● 記録中 — そのまま(ポッという音が鳴るまで)")
+                : tr("● 기록 중 — 점을 계속 보세요", "● Recording — keep looking at the dot", "● 記録中 — 点を見続けてください")
             status.textColor = .systemGreen
         } else {
-            status.stringValue = lookingAway ? "띵 소리가 나면 기록을 시작해요" : "준비…"
+            status.stringValue = lookingAway
+                ? tr("띵 소리가 나면 기록을 시작해요", "Recording starts at the ting sound", "ティンという音で記録を始めます")
+                : tr("준비…", "Get ready…", "準備…")
             status.textColor = .systemOrange
         }
     }

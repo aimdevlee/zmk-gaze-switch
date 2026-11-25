@@ -88,16 +88,16 @@ cd app && ./bundle.sh
 open app/GazeSwitch.app
 ```
 
-The first launch asks for camera access. The app's menus and voice guidance are in Korean for now.
-From the menu bar icon:
+The first launch asks for camera access. The app follows the system language (English, Korean or Japanese);
+you can also pick one under **Language** in the menu. From the menu bar icon:
 
-- **다른 컴퓨터의 BLE 프로필** (BLE profile of the other computer): pick the profile you paired.
-- **보정 시작** (Start calibration; required, about one minute): a full-screen guide appears on the MacBook
+- **BLE profile of the other computer**: pick the profile you paired.
+- **Start calibration** (required, about one minute): a full-screen guide appears on the MacBook
   and each step is also read aloud, because you can't see this screen while looking at the other computer.
   Recording starts on the "ting" sound and ends on the "pop". Press Esc to cancel.
   - Looking at the MacBook: naturally → head still, eyes only → head toward the other computer, eyes on the MacBook
   - Looking at the other computer: naturally → both edges of its screen → head facing the MacBook, eyes only → head fully turned
-- **지금 이 맥으로 / 지금 다른 컴퓨터로** (Switch to this Mac / the other computer now): manual switch.
+- **Switch to this Mac now / Switch to the other computer now**: manual switch.
 
 ## How it decides
 
