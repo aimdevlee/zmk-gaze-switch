@@ -78,8 +78,8 @@ Check that `B1` selects BLE profile 1 and `U` goes back to USB.
 
 ## 3. Install GazeSwitch
 
-Download `GazeSwitch-x.y.z.zip` from the [latest release](https://github.com/aimdevlee/zmk-gaze-switch/releases/latest), unzip it, move `GazeSwitch.app`
-to Applications and open it. It needs macOS 13 or later and runs on both Apple silicon and Intel Macs.
+Download `GazeSwitch-x.y.z.dmg` from the [latest release](https://github.com/aimdevlee/zmk-gaze-switch/releases/latest), open it, drag `GazeSwitch`
+onto the Applications folder and open it from there. It needs macOS 13 or later and runs on both Apple silicon and Intel Macs.
 The app is signed and notarized, so it opens without a warning.
 
 ### Or build it yourself

@@ -78,8 +78,8 @@ screen /dev/cu.usbmodemXXXX 115200
 
 ## 3. GazeSwitch のインストール
 
-[最新のリリース](https://github.com/aimdevlee/zmk-gaze-switch/releases/latest)から `GazeSwitch-x.y.z.zip` をダウンロードして展開し、`GazeSwitch.app` を
-アプリケーションフォルダに移して開きます。macOS 13 以降が必要で、Apple シリコンと Intel のどちらの Mac でも動きます。
+[最新のリリース](https://github.com/aimdevlee/zmk-gaze-switch/releases/latest)から `GazeSwitch-x.y.z.dmg` をダウンロードして開き、`GazeSwitch` を
+アプリケーションフォルダにドラッグして、そこから開きます。macOS 13 以降が必要で、Apple シリコンと Intel のどちらの Mac でも動きます。
 署名と公証を済ませたアプリなので、警告なしで開けます。
 
 ### 自分でビルドする
