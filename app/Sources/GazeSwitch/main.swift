@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private weak var eyeRow: NSMenuItem?
     private weak var scoreRow: NSMenuItem?
     private var menuOpen = false
+    private var shownSymbol: String?
 
     private var enabled: Bool {
         get { defaults.object(forKey: "enabled") as? Bool ?? true }
@@ -316,6 +317,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         else if !autoSwitching { symbol = "pause.circle" }
         else { symbol = classifier.current == .mac ? "laptopcomputer" : "desktopcomputer" }
 
+        // Called for every camera frame; only touch the status item on a change.
+        guard symbol != shownSymbol else { return }
+        shownSymbol = symbol
         let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "GazeSwitch")
             ?? NSImage(systemSymbolName: "keyboard", accessibilityDescription: "GazeSwitch")
         image?.isTemplate = true

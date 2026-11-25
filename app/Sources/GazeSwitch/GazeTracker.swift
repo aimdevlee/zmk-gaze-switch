@@ -58,6 +58,21 @@ final class GazeTracker: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate 
     }
     private let eyeSmoothing = 0.4
 
+    // Built once and reused on the capture queue. Setting `revision` makes
+    // Vision re-check its list of supported revisions, which cost about a
+    // fifth of the per-frame time when these were created for every frame.
+    private let faceRequest: VNDetectFaceRectanglesRequest = {
+        let request = VNDetectFaceRectanglesRequest()
+        // Revision 3 reports continuous yaw and pitch; earlier ones quantize yaw to 45°.
+        request.revision = VNDetectFaceRectanglesRequestRevision3
+        return request
+    }()
+    private let landmarkRequest: VNDetectFaceLandmarksRequest = {
+        let request = VNDetectFaceLandmarksRequest()
+        request.revision = VNDetectFaceLandmarksRequestRevision3
+        return request
+    }()
+
     static func requestAccess(_ done: @escaping (Bool) -> Void) {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized: done(true)
@@ -113,9 +128,7 @@ final class GazeTracker: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate 
 
         let handler = VNImageRequestHandler(cvPixelBuffer: pixels, orientation: .up)
 
-        let faces = VNDetectFaceRectanglesRequest()
-        // Revision 3 reports continuous yaw and pitch; earlier ones quantize yaw to 45°.
-        faces.revision = VNDetectFaceRectanglesRequestRevision3
+        let faces = faceRequest
         try? handler.perform([faces])
 
         let face = (faces.results ?? []).max {
@@ -129,8 +142,7 @@ final class GazeTracker: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate 
         var pose = HeadPose(yaw: yaw * 180 / .pi, pitch: (face.pitch?.doubleValue ?? 0) * 180 / .pi)
 
         // Landmarks only for the face we already picked: cheaper than searching again.
-        let landmarks = VNDetectFaceLandmarksRequest()
-        landmarks.revision = VNDetectFaceLandmarksRequestRevision3
+        let landmarks = landmarkRequest
         landmarks.inputFaceObservations = [face]
         try? handler.perform([landmarks])
 
