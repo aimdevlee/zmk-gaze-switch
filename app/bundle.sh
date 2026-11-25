@@ -25,6 +25,8 @@ BIN=$(swift build "${FLAGS[@]}" --show-bin-path)
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 cp "$BIN/GazeSwitch" "$APP/Contents/MacOS/GazeSwitch"
+mkdir -p "$APP/Contents/Resources"
+cp icon/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"   # redraw with icon/make-icns.sh
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -34,6 +36,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleName</key><string>GazeSwitch</string>
   <key>CFBundleIdentifier</key><string>io.github.aimdevlee.GazeSwitch</string>
   <key>CFBundleExecutable</key><string>GazeSwitch</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>1</string>
