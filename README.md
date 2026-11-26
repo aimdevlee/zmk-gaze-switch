@@ -188,7 +188,8 @@ One vendor HID interface: usage page `0xFF9A`, usage `0x01`, 32-byte reports, no
 Write the command as ASCII in an output report, zero padded. One input report comes back on the same link.
 
 Reply: `ZMK-HOS 2 <U|B> <profile> <BLE connected 0|1> <me 0|1> <sender>`, or `ZMK-HOS 2 ERR` on failure.
-`<me>` is 1 when the selected output is the sender. `<sender>` is `U` over USB, or the sender's BLE profile.
+`<me>` is 1 when the selected output is the sender. `<sender>` is `U` over USB, the sender's BLE profile over Bluetooth, or `-` when a Bluetooth sender is on no profile
+(`<me>` is then 0 and `M` fails).
 
 Over Bluetooth, any paired computer can send commands, not only the one on the selected profile.
 That is how a computer takes the keyboard back.

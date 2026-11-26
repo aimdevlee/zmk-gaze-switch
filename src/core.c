@@ -8,6 +8,9 @@
  *          own BLE profile if it came over BLE
  *   ?      no change, report state
  *
+ * U and ? are matched on their first character alone: the serial port has
+ * always accepted trailing text there, and hosts may rely on it.
+ *
  * The transports (serial.c, hid.c) receive the text and send the reply.
  *
  * SPDX-License-Identifier: MIT
@@ -46,7 +49,7 @@ int hos_run(const char *cmd, size_t len, const struct hos_sender *from) {
     switch (cmd[0]) {
     case 'U':
     case 'u':
-        err = len == 1 ? zmk_endpoints_select_transport(ZMK_TRANSPORT_USB) : -EINVAL;
+        err = zmk_endpoints_select_transport(ZMK_TRANSPORT_USB);
         break;
 
     case 'B':
@@ -80,7 +83,6 @@ int hos_run(const char *cmd, size_t len, const struct hos_sender *from) {
         break;
 
     case '?':
-        err = len == 1 ? 0 : -EINVAL;
         break;
 
     default:

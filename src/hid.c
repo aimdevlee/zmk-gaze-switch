@@ -9,7 +9,11 @@
  *   ZMK-HOS 2 ERR
  *
  * <me> is 1 when the selected output is the sender itself. <sender> is U for
- * USB, or the BLE profile the sending host is bonded on.
+ * USB, the BLE profile the sending host is bonded on, or - for a BLE host that
+ * is on no profile (<me> is then 0, and M is answered with ERR).
+ *
+ * Every command gets one reply. A command that arrives while too many are
+ * still waiting is not run and is answered with ERR.
  *
  * Over BLE this is a second HID service next to ZMK's keyboard one. ZMK keeps
  * every bonded host connected, selected or not, so a host on a non-selected
@@ -38,20 +42,23 @@ LOG_MODULE_DECLARE(zmk_host_output_switch, CONFIG_ZMK_LOG_LEVEL);
 
 #define REPORT_SIZE 32
 
+/* Hosts find the interface by these two, so they are part of the protocol. */
+#define USAGE_PAGE 0xFF9A
+#define USAGE 0x01
+
 static const uint8_t report_desc[] = {
-    0x06, CONFIG_ZMK_HOST_OUTPUT_SWITCH_HID_USAGE_PAGE & 0xFF,
-    (CONFIG_ZMK_HOST_OUTPUT_SWITCH_HID_USAGE_PAGE >> 8) & 0xFF, /* Usage Page (vendor) */
-    0x09, CONFIG_ZMK_HOST_OUTPUT_SWITCH_HID_USAGE,              /* Usage */
-    0xA1, 0x01,                                                 /* Collection (Application) */
-    0x15, 0x00,                                                 /*   Logical Minimum (0) */
-    0x26, 0xFF, 0x00,                                           /*   Logical Maximum (255) */
-    0x75, 0x08,                                                 /*   Report Size (8) */
-    0x95, REPORT_SIZE,                                          /*   Report Count */
-    0x09, 0x01,                                                 /*   Usage (reply) */
-    0x81, 0x02,                                                 /*   Input (Data,Var,Abs) */
-    0x09, 0x02,                                                 /*   Usage (command) */
-    0x91, 0x02,                                                 /*   Output (Data,Var,Abs) */
-    0xC0,                                                       /* End Collection */
+    0x06, USAGE_PAGE & 0xFF, USAGE_PAGE >> 8, /* Usage Page (vendor) */
+    0x09, USAGE,                              /* Usage */
+    0xA1, 0x01,                               /* Collection (Application) */
+    0x15, 0x00,                               /*   Logical Minimum (0) */
+    0x26, 0xFF, 0x00,                         /*   Logical Maximum (255) */
+    0x75, 0x08,                               /*   Report Size (8) */
+    0x95, REPORT_SIZE,                        /*   Report Count */
+    0x09, 0x01,                               /*   Usage (reply) */
+    0x81, 0x02,                               /*   Input (Data,Var,Abs) */
+    0x09, 0x02,                               /*   Usage (command) */
+    0x91, 0x02,                               /*   Output (Data,Var,Abs) */
+    0xC0,                                     /* End Collection */
 };
 
 /* One received command, queued for the system work queue. */
@@ -62,6 +69,13 @@ struct request {
 };
 
 K_MSGQ_DEFINE(requests, sizeof(struct request), 4, 4);
+
+/*
+ * Commands that found the queue full, counted per sender so each still gets
+ * its ERR: one slot per BLE connection, and the last one for USB.
+ */
+#define DROPPED_USB CONFIG_BT_MAX_CONN
+static atomic_t dropped[CONFIG_BT_MAX_CONN + 1];
 
 static void process(struct k_work *work);
 static K_WORK_DEFINE(process_work, process);
@@ -76,10 +90,11 @@ static void enqueue(struct bt_conn *conn, const uint8_t *data, size_t len) {
 
     if (k_msgq_put(&requests, &req, K_NO_WAIT) != 0) {
         LOG_WRN("command dropped, queue full");
+        /* We may not send from here (USB or BLE receive context); process() does. */
+        atomic_inc(&dropped[conn != NULL ? bt_conn_index(conn) : DROPPED_USB]);
         if (req.conn != NULL) {
             bt_conn_unref(req.conn);
         }
-        return;
     }
     k_work_submit(&process_work);
 }
@@ -268,6 +283,21 @@ static void ble_reply(struct bt_conn *conn, const char *text) {
 
 /* ---- both ---------------------------------------------------------------- */
 
+static const char rejected[] = "ZMK-HOS 2 ERR";
+
+static void reject_dropped_ble(struct bt_conn *conn, void *data) {
+    for (atomic_val_t n = atomic_clear(&dropped[bt_conn_index(conn)]); n > 0; n--) {
+        ble_reply(conn, rejected);
+    }
+}
+
+static void reject_dropped(void) {
+    for (atomic_val_t n = atomic_clear(&dropped[DROPPED_USB]); n > 0; n--) {
+        usb_reply(rejected);
+    }
+    bt_conn_foreach(BT_CONN_TYPE_LE, reject_dropped_ble, NULL);
+}
+
 static void process(struct k_work *work) {
     struct request req;
 
@@ -283,7 +313,7 @@ static void process(struct k_work *work) {
         char out[REPORT_SIZE + 1];
 
         if (hos_run(req.text, req.len, &from) != 0) {
-            snprintf(out, sizeof(out), "ZMK-HOS 2 ERR");
+            snprintf(out, sizeof(out), "%s", rejected);
         } else {
             struct hos_state state;
             char sender[4] = "-";
@@ -306,4 +336,6 @@ static void process(struct k_work *work) {
             usb_reply(out);
         }
     }
+    /* After the queued ones: the dropped commands arrived later. */
+    reject_dropped();
 }
