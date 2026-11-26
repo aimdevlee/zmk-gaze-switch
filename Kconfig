@@ -1,17 +1,63 @@
-config ZMK_HOST_OUTPUT_SWITCH
-    bool "Let the host switch the output (USB / BLE profile) over a USB serial port"
-    depends on ZMK_USB && ZMK_BLE
+DT_CHOSEN_ZMK_HOST_OUTPUT_SWITCH_UART := zmk,host-output-switch-uart
+
+menuconfig ZMK_HOST_OUTPUT_SWITCH
+    bool "Let a host switch the output (USB / BLE profile)"
+    depends on ZMK_BLE
+    depends on !ZMK_SPLIT || ZMK_SPLIT_ROLE_CENTRAL
+    help
+      A host sends short text commands and the keyboard moves its output
+      between USB and its BLE profiles. The commands and replies are listed
+      under "Protocol" in the module's README.
+
+      On a split keyboard this is only built for the central half.
+
+if ZMK_HOST_OUTPUT_SWITCH
+
+config ZMK_HOST_OUTPUT_SWITCH_SERIAL
+    bool "Commands over a dedicated USB serial (CDC ACM) port"
+    default $(dt_chosen_enabled,$(DT_CHOSEN_ZMK_HOST_OUTPUT_SWITCH_UART))
+    depends on ZMK_USB
     depends on UART_INTERRUPT_DRIVEN && UART_LINE_CTRL
     select RING_BUFFER
     help
-      Adds a line protocol on a dedicated CDC ACM port (chosen node
-      zmk,host-output-switch-uart):
-        U      select the USB output
-        B      select the BLE output (current profile)
-        B<n>   select BLE profile n, then the BLE output
-        ?      report state only
-      Every command answers with one line:
-        ZMK-HOS 1 <U|B> <profile> <ble-connected 0|1>
-      or ZMK-HOS 1 ERR when it was rejected (e.g. profile out of range).
+      Line protocol on the chosen node zmk,host-output-switch-uart.
 
-      On a split keyboard enable this on the central half only.
+config ZMK_HOST_OUTPUT_SWITCH_HID
+    bool "Commands over a vendor HID interface (USB and BLE)"
+    help
+      Adds one vendor-defined HID interface (usage page 0xFF9A, usage 0x01,
+      32-byte reports), on USB (needs CONFIG_USB_HID_DEVICE_COUNT=2) and as
+      a second HID service over BLE.
+
+      Over BLE a command is accepted from any bonded host, not only the
+      selected profile, so a host can take the keyboard back.
+
+if ZMK_HOST_OUTPUT_SWITCH_HID
+
+config ZMK_HOST_OUTPUT_SWITCH_HID_USB_DEVICE
+    string "USB HID device used for the interface"
+    default "HID_1"
+    help
+      HID_0 belongs to ZMK's keyboard. Change this only when another module
+      already claims HID_1 (and raise CONFIG_USB_HID_DEVICE_COUNT to match).
+
+endif # ZMK_HOST_OUTPUT_SWITCH_HID
+
+config ZMK_HOST_OUTPUT_SWITCH_BLE_RECONNECT
+    bool "Let bonded hosts on non-selected profiles reconnect"
+    default y if ZMK_HOST_OUTPUT_SWITCH_HID
+    help
+      ZMK stops advertising once the selected profile is connected, so a
+      host on another profile that drops (sleep, Bluetooth off) cannot come
+      back until its profile is selected. With this option the keyboard keeps
+      advertising while any bonded profile is disconnected. It does so at
+      ZMK's interval for 30 seconds after a host drops and while the selected
+      profile has no host, and about once a second otherwise, so that a
+      pointing device on the keyboard stays smooth. A host that was away for
+      longer can take a few seconds more to reconnect.
+
+      Needed to drive the switch over BLE alone. Pairing is unchanged: new
+      hosts are still only accepted into an open, selected profile. Costs
+      battery for as long as a bonded host stays away.
+
+endif # ZMK_HOST_OUTPUT_SWITCH

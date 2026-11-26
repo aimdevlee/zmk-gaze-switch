@@ -1,174 +1,248 @@
-import Darwin
 import Foundation
+import os
 
-/// Talks to the keyboard's host-output-switch serial port (see src/host_output_switch.c).
+/// Talks to the keyboard's host-output-switch module (see ../../../src).
 ///
-/// The keyboard exposes two USB serial ports: ZMK Studio and ours. We don't
-/// guess from the device path; we open each candidate, send `?`, and keep the
-/// one that answers with `ZMK-HOS 1`.
+/// Three ways in, best first:
+///  1. the vendor HID interface over USB,
+///  2. the USB serial port (firmware built before the HID interface existed),
+///  3. the vendor HID interface over Bluetooth, when no cable is plugged in.
+///
+/// The link moves to a better way as soon as one answers, and to a worse one
+/// when the way it had goes away.
 final class KeyboardLink {
+    /// What the keyboard reports about itself.
     struct State: Equatable {
+        /// The selected output is USB.
         var usb: Bool
+        /// The selected BLE profile.
         var profile: Int
         var bleConnected: Bool
+        /// The selected output is this Mac: USB when we talk over USB, our own
+        /// BLE profile when we talk over Bluetooth.
+        var onThisMac: Bool
+
+        /// The command that would point the keyboard where it points now, if there is one.
+        fileprivate var asTarget: KeyboardCommand? {
+            if onThisMac { return .selectThisMac }
+            return usb ? nil : .selectProfile(profile)
+        }
+
+        fileprivate func satisfies(_ target: KeyboardCommand) -> Bool {
+            switch target {
+            case .query: return true
+            case .selectThisMac: return onThisMac
+            case .selectProfile(let wanted): return !usb && profile == wanted
+            }
+        }
     }
 
-    private(set) var portPath: String?
-    private var fd: Int32 = -1
-    private let queue = DispatchQueue(label: "gaze-switch.serial")
+    /// The ways in, best first.
+    enum Route: Int {
+        case usbHID, usbSerial, bluetoothHID
+
+        fileprivate var name: String {
+            switch self {
+            case .usbHID: return "USB HID"
+            case .usbSerial: return "the USB serial port"
+            case .bluetoothHID: return "Bluetooth HID"
+            }
+        }
+    }
 
     /// Called on the main queue whenever the connection or reported state changes.
-    var onChange: ((_ connected: Bool, _ state: State?) -> Void)?
-
-    var isConnected: Bool { queue.sync { fd >= 0 } }
-
-    /// Called on the main queue when a port is found, with the keyboard's current state.
+    /// `overBluetooth` says how commands travel, not where the keyboard points.
+    var onChange: ((_ connected: Bool, _ state: State?, _ overBluetooth: Bool) -> Void)?
+    /// Called on the main queue when the keyboard is found and the app should
+    /// take over where it points, with its current state.
     var onConnect: ((State) -> Void)?
     /// Called on the main queue when the keyboard rejects a command.
     var onError: ((String) -> Void)?
 
-    private var rejected: Set<String> = []
-    private var lastListing: [String] = []
+    var isConnected: Bool { queue.sync { link != nil } }
 
-    /// Looks for the port in the background if we don't have one.
-    ///
-    /// Paths that didn't answer are skipped until the /dev listing changes,
-    /// so an absent keyboard or unrelated serial devices aren't poked forever.
+    /// Looks for the keyboard, or for a better way to reach it, in the background.
     func connectInBackground() {
-        queue.async { [self] in
-            if fd >= 0 { return }
-            let listing = Self.candidatePaths()
-            if listing != lastListing {
-                lastListing = listing
-                rejected = []
-            }
-            for path in listing where !rejected.contains(path) {
-                guard let handle = Self.open(path) else { rejected.insert(path); continue }
-                if case .state(let state) = Self.exchange(handle, "?") {
-                    fd = handle
-                    portPath = path
-                    notify(true, state)
-                    let callback = onConnect
-                    DispatchQueue.main.async { callback?(state) }
-                    return
-                }
-                Darwin.close(handle)
-                rejected.insert(path)
-            }
-        }
+        queue.async { [self] in connectLocked() }
     }
 
-    /// Sends `U` (this Mac) or `B<n>` (BLE profile n) in the background.
-    func select(usb: Bool, profile: Int) {
-        queue.async { [self] in
-            guard fd >= 0 else { return }
-            let command = usb ? "U" : "B\(profile)"
-            switch Self.exchange(fd, command) {
-            case .state(let state):
-                notify(true, state)
-            case .error:
-                let callback = onError
-                DispatchQueue.main.async { callback?(tr("키보드가 '\(command)' 명령을 거부했어요 (프로필 번호를 확인하세요)",
-                                                          "The keyboard rejected the '\(command)' command (check the profile number)",
-                                                          "キーボードが「\(command)」コマンドを拒否しました(プロファイル番号を確認してください)")) }
-            case nil:
-                dropLocked()
-            }
-        }
+    /// Points the keyboard at this Mac. Asked while the keyboard is away, it is
+    /// carried out if the keyboard comes back soon.
+    func selectThisMac() {
+        queue.async { [self] in askLocked(.selectThisMac) }
+    }
+
+    /// Points the keyboard at BLE profile `profile` (the other computer).
+    func selectProfile(_ profile: Int) {
+        queue.async { [self] in askLocked(.selectProfile(profile)) }
     }
 
     func disconnect() {
-        queue.async { [self] in dropLocked() }
+        queue.async { [self] in
+            abandonGreetingLocked()
+            dropLocked()
+        }
     }
 
-    // MARK: - Internals
+    // MARK: - Internals (everything below runs on `queue`)
 
-    private func dropLocked() {
-        guard fd >= 0 else { return }
-        Darwin.close(fd)
-        fd = -1
-        portPath = nil
-        notify(false, nil)
+    private static let log = Logger(subsystem: "io.github.aimdevlee.GazeSwitch", category: "keyboard")
+
+    private let queue = DispatchQueue(label: "gaze-switch.keyboard")
+    /// The way in we use. It has answered at least once.
+    private var link: KeyboardTransport?
+    /// An HID interface we have sent `?` to and not heard from yet. It exists
+    /// only while that `?` is out, and never replaces `link` before it answers.
+    private var greeting: HIDLink?
+    /// Created at the first search, not in `init`: its first callback can arrive at
+    /// once, and the owner must have set `onChange` / `onConnect` by then.
+    private var hid: HIDInterfaces?
+    private var serialPorts = SerialPort.Finder()
+
+    /// Where the keyboard should point: what the app last asked for, or, once
+    /// the keyboard has confirmed that, wherever the keyboard says it points.
+    private var target: KeyboardCommand?
+    /// Set while the keyboard has not confirmed `target`, with the time it was asked for.
+    private var targetAskedAt: Date?
+    /// The way in we had before this one (or before none), and when we left it.
+    private var previous: (route: Route, leftAt: Date)?
+    /// How long after losing the keyboard, or asking in vain, `target` still
+    /// counts when the keyboard is found again.
+    private static let targetLifetime = 30.0
+
+    private func askLocked(_ command: KeyboardCommand) {
+        target = command
+        targetAskedAt = Date()
+        link?.send(command)
     }
 
-    private func notify(_ connected: Bool, _ state: State?) {
-        let callback = onChange
-        DispatchQueue.main.async { callback?(connected, state) }
+    /// The keyboard said where it points.
+    private func heardLocked(_ state: State) {
+        if targetAskedAt == nil {
+            target = state.asTarget
+        } else if let target, state.satisfies(target) {
+            targetAskedAt = nil
+        }
+        notifyLocked(state)
     }
 
-    private static func candidatePaths() -> [String] {
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: "/dev")) ?? []
-        return names.filter { $0.hasPrefix("cu.usbmodem") }.sorted().map { "/dev/" + $0 }
+    /// `target`, when the keyboard just found must be told about it again:
+    /// - it never confirmed the last thing we asked for (the reply, or the
+    ///   whole link, was lost), or
+    /// - we reach it another way than before. Pulling or plugging the cable
+    ///   makes the keyboard itself move its output; nobody chose that.
+    /// A keyboard that comes back the same way keeps whatever it points at:
+    /// someone may have changed it on the keyboard.
+    private func targetToRestoreLocked(over route: Route, given state: State) -> KeyboardCommand? {
+        guard let target, !state.satisfies(target) else { return nil }
+        let since: Date?
+        if let targetAskedAt {
+            since = targetAskedAt
+        } else if let previous, previous.route != route {
+            since = previous.leftAt
+        } else {
+            since = nil
+        }
+        guard let since, Date().timeIntervalSince(since) < Self.targetLifetime else { return nil }
+        return target
     }
 
-    private static func open(_ path: String) -> Int32? {
-        let handle = Darwin.open(path, O_RDWR | O_NOCTTY | O_NONBLOCK)
-        guard handle >= 0 else { return nil }
+    private func connectLocked() {
+        let hid = hid ?? startWatchingHIDLocked()
 
-        var tio = termios()
-        tcgetattr(handle, &tio)
-        cfmakeraw(&tio)
-        // Never 1200 baud: that speed tells the bootloader trigger to reset.
-        cfsetspeed(&tio, speed_t(B115200))
-        tio.c_cflag |= tcflag_t(CLOCAL | CREAD)
-        tcsetattr(handle, TCSANOW, &tio)
+        if let link, !link.isStillThere { dropLocked() }
+        if greeting != nil { return } // its answer, or its silence, brings us back here
 
-        // The firmware only answers while DTR is asserted.
-        var bits: Int32 = TIOCM_DTR
-        _ = ioctl(handle, TIOCMBIS, &bits)
-        // Give the DTR control request time to reach the keyboard; a command
-        // sent before it lands is answered into a port the firmware thinks is
-        // closed, and the reply is dropped. (Seen on real hardware.)
-        usleep(300_000)
-        tcflush(handle, TCIOFLUSH)
-        return handle
+        if link?.route != .usbHID, let usb = hid.openLink(bluetooth: false) {
+            greetLocked(usb)
+            return
+        }
+        // The serial port beats Bluetooth too, if the USB HID interface stayed silent.
+        if link == nil || link?.route == .bluetoothHID, let (port, state) = serialPorts.find() {
+            adoptLocked(port, state)
+        } else if link == nil, let bluetooth = hid.openLink(bluetooth: true) {
+            greetLocked(bluetooth)
+        }
     }
 
-    /// Writes one command line and waits briefly for the status line.
-    private enum Reply {
-        case state(State)
-        case error
+    /// Re-enters `connectLocked` before it returns if an interface is already attached.
+    private func startWatchingHIDLocked() -> HIDInterfaces {
+        let interfaces = HIDInterfaces(queue: queue) { [unowned self] in connectLocked() }
+        hid = interfaces
+        interfaces.startWatching()
+        return interfaces
     }
 
-    private static func exchange(_ handle: Int32, _ command: String) -> Reply? {
-        tcflush(handle, TCIFLUSH)
-        let bytes = Array((command + "\n").utf8)
-        let written = bytes.withUnsafeBytes { Darwin.write(handle, $0.baseAddress, $0.count) }
-        guard written == bytes.count else { return nil }
-
-        var received = ""
-        let deadline = Date().addingTimeInterval(0.4)
-        var buffer = [UInt8](repeating: 0, count: 64)
-
-        while Date() < deadline {
-            var pfd = pollfd(fd: handle, events: Int16(POLLIN), revents: 0)
-            let remaining = Int32(max(1, deadline.timeIntervalSinceNow * 1000))
-            guard poll(&pfd, 1, remaining) > 0 else { continue }
-            if pfd.revents & Int16(POLLHUP | POLLERR | POLLNVAL) != 0 { return nil }
-
-            let n = Darwin.read(handle, &buffer, buffer.count)
-            if n < 0 && errno != EAGAIN { return nil }
-            if n > 0 { received += String(decoding: buffer[0..<n], as: UTF8.self) }
-
-            while let newline = received.firstIndex(of: "\n") {
-                let line = String(received[..<newline]).trimmingCharacters(in: .whitespaces)
-                received = String(received[received.index(after: newline)...])
-                if let reply = parse(line) { return reply }
+    private func greetLocked(_ candidate: HIDLink) {
+        greeting = candidate
+        candidate.onEvent = { [unowned self, unowned candidate] event in
+            greeting = nil
+            if case .state(let state) = event {
+                adoptLocked(candidate, state)
+            } else {
+                // Silent, or it answered `?` with an error: not a way in for now.
+                hid?.giveUp(on: candidate)
+                connectLocked()
             }
         }
-        return nil
+        candidate.send(.query)
     }
 
-    /// `ZMK-HOS 1 <U|B> <profile> <ble-connected>` or `ZMK-HOS 1 ERR`.
-    /// `ZEN-HOS` is the name the protocol had before it left the ZEN firmware;
-    /// keyboards flashed back then still answer with it.
-    private static let identities: Set<Substring> = ["ZMK-HOS", "ZEN-HOS"]
+    private func abandonGreetingLocked() {
+        greeting?.close()
+        greeting = nil
+    }
 
-    private static func parse(_ line: String) -> Reply? {
-        let parts = line.split(separator: " ")
-        guard parts.count >= 3, identities.contains(parts[0]), parts[1] == "1" else { return nil }
-        if parts.count == 3, parts[2] == "ERR" { return .error }
-        guard parts.count == 5, let profile = Int(parts[3]) else { return nil }
-        return .state(State(usb: parts[2] == "U", profile: profile, bleConnected: parts[4] == "1"))
+    private func adoptLocked(_ transport: KeyboardTransport, _ state: State) {
+        if let replaced = link {
+            previous = (replaced.route, Date())
+            replaced.close()
+        }
+        link = transport
+        transport.onEvent = { [unowned self, unowned transport] event in
+            guard transport === link else { return }
+            switch event {
+            case .state(let state): heardLocked(state)
+            case .rejected(let command):
+                targetAskedAt = nil
+                target = nil
+                reportRejected(command)
+            case .lost: dropLocked()
+            }
+        }
+        Self.log.notice("connected over \(transport.route.name, privacy: .public)")
+        if let restore = targetToRestoreLocked(over: transport.route, given: state) {
+            // The app's idea of where the keyboard points still stands, so no `onConnect`.
+            notifyLocked(state)
+            targetAskedAt = Date()
+            transport.send(restore)
+        } else {
+            targetAskedAt = nil
+            heardLocked(state)
+            let callback = onConnect
+            DispatchQueue.main.async { callback?(state) }
+        }
+    }
+
+    private func dropLocked() {
+        guard let lost = link else { return }
+        link = nil
+        previous = (lost.route, Date())
+        lost.close()
+        Self.log.notice("keyboard link lost")
+        notifyLocked(nil)
+    }
+
+    private func notifyLocked(_ state: State?) {
+        let callback = onChange
+        let overBluetooth = link?.route == .bluetoothHID
+        DispatchQueue.main.async { callback?(state != nil, state, overBluetooth) }
+    }
+
+    private func reportRejected(_ command: String) {
+        let callback = onError
+        DispatchQueue.main.async { callback?(tr("키보드가 '\(command)' 명령을 거부했어요 (프로필 번호를 확인하세요)",
+                                                  "The keyboard rejected the '\(command)' command (check the profile number)",
+                                                  "キーボードが「\(command)」コマンドを拒否しました(プロファイル番号を確認してください)")) }
     }
 }

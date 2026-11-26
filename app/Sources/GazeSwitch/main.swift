@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private var lastPose: HeadPose?
     private var keyboardState: KeyboardLink.State?
+    private var controlledOverBluetooth = false
     private var cameraError: String?
     private var calibration: CalibrationSession?
 
@@ -64,14 +65,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.menu = menu
 
         tracker.onPose = { [weak self] pose in self?.handle(pose) }
-        link.onChange = { [weak self] connected, state in
+        link.onChange = { [weak self] connected, state, overBluetooth in
             self?.keyboardState = connected ? state : nil
+            self?.controlledOverBluetooth = overBluetooth
             self?.refreshIcon()
             self?.refreshLiveRows()
         }
         // Adopt whatever the keyboard is doing now; gaze + dwell make the next change.
         link.onConnect = { [weak self] state in
-            self?.classifier.force(state.usb ? .mac : .other)
+            self?.classifier.force(state.onThisMac ? .mac : .other)
             self?.refreshIcon()
         }
         link.onError = { [weak self] message in self?.alert(message) }
@@ -135,8 +137,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func send(_ target: Target) {
-        guard keyboardState != nil else { return }
-        link.select(usb: target == .mac, profile: profile)
+        switch target {
+        case .mac: link.selectThisMac()
+        case .other: link.selectProfile(profile)
+        }
     }
 
     private func switchManually(to target: Target) {
@@ -259,15 +263,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private var keyboardText: String {
         guard let state = keyboardState else {
-            return tr("키보드: 찾는 중… (키보드를 USB로 연결하세요)",
-                      "Keyboard: searching… (plug the keyboard in over USB)",
-                      "キーボード: 検索中…(キーボードを USB で接続してください)")
+            return tr("키보드: 찾는 중… (USB로 연결하거나 블루투스로 페어링하세요)",
+                      "Keyboard: searching… (plug it in over USB, or pair it over Bluetooth)",
+                      "キーボード: 検索中…(USB で接続するか Bluetooth でペアリングしてください)")
         }
+        let thisMac = state.onThisMac ? tr(" (이 맥)", " (this Mac)", "(この Mac)") : ""
         let out = state.usb
-            ? tr("USB (이 맥)", "USB (this Mac)", "USB(この Mac)")
+            ? "USB" + thisMac
             : tr("BLE 프로필 \(state.profile)", "BLE profile \(state.profile)", "BLE プロファイル \(state.profile)")
+                + thisMac
                 + (state.bleConnected ? "" : tr(" · 연결 안 됨", " · not connected", " · 未接続"))
-        return tr("키보드: ", "Keyboard: ", "キーボード: ") + out
+        let via = controlledOverBluetooth ? tr(" · 블루투스로 제어", " · controlled over Bluetooth", " · Bluetooth で制御") : ""
+        return tr("키보드: ", "Keyboard: ", "キーボード: ") + out + via
     }
 
     private var faceText: String {
