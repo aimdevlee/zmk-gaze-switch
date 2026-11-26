@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private var lastPose: HeadPose?
     private var keyboardState: KeyboardLink.State?
+    private var controlledOverBluetooth = false
     private var cameraError: String?
     private var calibration: CalibrationSession?
 
@@ -64,8 +65,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.menu = menu
 
         tracker.onPose = { [weak self] pose in self?.handle(pose) }
-        link.onChange = { [weak self] connected, state in
+        link.onChange = { [weak self] connected, state, overBluetooth in
             self?.keyboardState = connected ? state : nil
+            self?.controlledOverBluetooth = overBluetooth
             self?.refreshIcon()
             self?.refreshLiveRows()
         }
@@ -135,8 +137,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func send(_ target: Target) {
-        guard keyboardState != nil else { return }
-        link.select(thisMac: target == .mac, profile: profile)
+        switch target {
+        case .mac: link.selectThisMac()
+        case .other: link.selectProfile(profile)
+        }
     }
 
     private func switchManually(to target: Target) {
@@ -263,12 +267,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                       "Keyboard: searching… (plug it in over USB, or pair it over Bluetooth)",
                       "キーボード: 検索中…(USB で接続するか Bluetooth でペアリングしてください)")
         }
+        let thisMac = state.onThisMac ? tr(" (이 맥)", " (this Mac)", "(この Mac)") : ""
         let out = state.usb
-            ? tr("USB (이 맥)", "USB (this Mac)", "USB(この Mac)")
+            ? "USB" + thisMac
             : tr("BLE 프로필 \(state.profile)", "BLE profile \(state.profile)", "BLE プロファイル \(state.profile)")
-                + (state.onThisMac ? tr(" (이 맥)", " (this Mac)", "(この Mac)") : "")
+                + thisMac
                 + (state.bleConnected ? "" : tr(" · 연결 안 됨", " · not connected", " · 未接続"))
-        let via = state.wireless ? tr(" · 블루투스로 제어", " · controlled over Bluetooth", " · Bluetooth で制御") : ""
+        let via = controlledOverBluetooth ? tr(" · 블루투스로 제어", " · controlled over Bluetooth", " · Bluetooth で制御") : ""
         return tr("키보드: ", "Keyboard: ", "キーボード: ") + out + via
     }
 
