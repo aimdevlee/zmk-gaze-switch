@@ -47,7 +47,7 @@ final class KeyboardLink {
     private var rejected: Set<String> = []
     private var lastListing: [String] = []
 
-    // Vendor HID interface of the module (CONFIG_ZMK_HOST_OUTPUT_SWITCH_HID_USAGE_PAGE / _USAGE).
+    // Vendor HID interface of the module (USAGE_PAGE / USAGE in ../../../src/hid.c).
     private static let hidUsagePage = 0xFF9A
     private static let hidUsage = 0x01
     private static let hidReportSize = 32
@@ -65,8 +65,12 @@ final class KeyboardLink {
     private var hidRejectedAt = Date.distantPast
     private static let hidRejectionLifetime = 10.0
     /// The command we are waiting on, and a token that tells its timeout apart from older ones.
+    /// Only one is out at a time, so every reply belongs to it.
     private var hidPending: (command: String, token: Int)?
     private var hidToken = 0
+    /// Asked for while `hidPending` was out; sent when its reply arrives. A newer
+    /// request replaces it: only the last place to point the keyboard at matters.
+    private var hidNext: String?
 
     private var hidStarted = false
 
@@ -157,7 +161,12 @@ final class KeyboardLink {
             } else if hidDevice != nil, hidGreeted {
                 // `M` lets the keyboard work out what "the sender" is: USB over a
                 // cable, our own BLE profile over Bluetooth.
-                hidSend(thisMac ? "M" : "B\(profile)")
+                let command = thisMac ? "M" : "B\(profile)"
+                if hidPending == nil {
+                    hidSend(command)
+                } else {
+                    hidNext = command
+                }
             }
         }
     }
@@ -183,6 +192,7 @@ final class KeyboardLink {
         hidDevice = nil
         hidGreeted = false
         hidPending = nil
+        hidNext = nil
         if wasConnected {
             Self.log.notice("keyboard link lost")
             notify(false, nil)
@@ -250,6 +260,10 @@ final class KeyboardLink {
         case .error:
             // A rejected `?` can't happen; a rejected first command still proves who answered.
             reportRejected(pending.command)
+        }
+        if let next = hidNext {
+            hidNext = nil
+            hidSend(next)
         }
     }
 
