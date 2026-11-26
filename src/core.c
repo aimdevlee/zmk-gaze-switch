@@ -24,6 +24,9 @@
 
 #include <zmk/ble.h>
 #include <zmk/endpoints.h>
+#if IS_ENABLED(CONFIG_ZMK_USB)
+#include <zmk/usb.h>
+#endif
 
 #include "hos.h"
 
@@ -31,12 +34,18 @@ LOG_MODULE_REGISTER(zmk_host_output_switch, CONFIG_ZMK_LOG_LEVEL);
 
 /*
  * How long ZMK's BLE sender gets to take a queued report. It runs on its own,
- * lower-priority thread, so it only runs once we sleep.
+ * lower-priority thread, so it only runs once we sleep. Not a guarantee: a
+ * sender held up by a full radio queue can take longer.
  */
 #define BLE_SEND_GRACE K_MSEC(10)
 
+static bool output_is(enum zmk_transport transport) {
+    return zmk_endpoints_selected().transport == transport;
+}
+
 /*
- * Releases every held key on the output we are about to leave.
+ * Releases every held key and mouse button on the selected output, for when
+ * we are about to leave it.
  *
  * ZMK does this itself when the output changes, but over BLE the release is
  * only queued, and sent later to whichever profile is active by then. After a
@@ -44,34 +53,50 @@ LOG_MODULE_REGISTER(zmk_host_output_switch, CONFIG_ZMK_LOG_LEVEL);
  * repeats it for as long as it stays away. A host can switch while the user is
  * typing, so we queue the release first and let it leave before we switch.
  */
-static void leave_output_unless(bool already_there) {
-    if (already_there) {
-        return;
-    }
-    bool over_ble = zmk_endpoints_selected().transport == ZMK_TRANSPORT_BLE;
+static void release_held_keys(void) {
+    bool over_ble = output_is(ZMK_TRANSPORT_BLE);
 
     zmk_endpoints_clear_current();
+#if IS_ENABLED(CONFIG_ZMK_POINTING)
+    /* That cleared the mouse report too, but only sent the other two. */
+    zmk_endpoints_send_mouse_report();
+#endif
     if (over_ble) {
         k_sleep(BLE_SEND_GRACE);
     }
 }
 
-static bool output_is(enum zmk_transport transport) {
-    return zmk_endpoints_selected().transport == transport;
+/* Whether ZMK can send on this transport now: its is_usb_ready() and is_ble_ready(). */
+static bool transport_is_ready(enum zmk_transport transport) {
+    if (transport == ZMK_TRANSPORT_BLE) {
+        return zmk_ble_active_profile_is_connected();
+    }
+#if IS_ENABLED(CONFIG_ZMK_USB)
+    return zmk_usb_is_hid_ready();
+#else
+    return false;
+#endif
 }
 
-static int select_usb_output(void) {
-    leave_output_unless(output_is(ZMK_TRANSPORT_USB));
-    return zmk_endpoints_select_transport(ZMK_TRANSPORT_USB);
-}
-
-static int select_ble_output(void) {
-    leave_output_unless(output_is(ZMK_TRANSPORT_BLE));
-    return zmk_endpoints_select_transport(ZMK_TRANSPORT_BLE);
+static int select_output(enum zmk_transport transport) {
+    /* ZMK only moves to a transport that is ready; otherwise the output stays. */
+    if (!output_is(transport) && transport_is_ready(transport)) {
+        release_held_keys();
+    }
+    return zmk_endpoints_select_transport(transport);
 }
 
 static int select_ble_profile(int profile) {
-    leave_output_unless(output_is(ZMK_TRANSPORT_BLE) && zmk_ble_active_profile_index() == profile);
+    /*
+     * Another profile always takes the output away from the current one. From
+     * USB, ZMK only moves to the profile if its host is connected.
+     */
+    bool leaving = output_is(ZMK_TRANSPORT_BLE) ? zmk_ble_active_profile_index() != profile
+                                                : zmk_ble_profile_is_connected(profile);
+
+    if (leaving) {
+        release_held_keys();
+    }
 
     int err = zmk_ble_prof_select((uint8_t)profile);
 
@@ -105,13 +130,13 @@ int hos_run(const char *cmd, size_t len, const struct hos_sender *sender) {
     switch (cmd[0]) {
     case 'U':
     case 'u':
-        err = select_usb_output();
+        err = select_output(ZMK_TRANSPORT_USB);
         break;
 
     case 'B':
     case 'b':
         if (len == 1) {
-            err = select_ble_output();
+            err = select_output(ZMK_TRANSPORT_BLE);
         } else {
             int profile = parse_profile(cmd + 1, len - 1);
 
@@ -124,7 +149,7 @@ int hos_run(const char *cmd, size_t len, const struct hos_sender *sender) {
         if (len != 1) {
             err = -EINVAL;
         } else if (!sender->ble) {
-            err = select_usb_output();
+            err = select_output(ZMK_TRANSPORT_USB);
         } else if (sender->profile == HOS_NO_PROFILE) {
             err = -ENODEV;
         } else {

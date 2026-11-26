@@ -24,7 +24,12 @@ struct hos_state {
     bool connected; /* that profile's host is connected */
 };
 
-/* Runs one command (not NUL terminated). Returns 0 or a negative errno. */
+/*
+ * Runs one command (not NUL terminated). Returns 0 or a negative errno.
+ *
+ * May sleep for a few milliseconds when the command moves the output away
+ * from a BLE host, so call it from a thread, not from an interrupt.
+ */
 int hos_run(const char *cmd, size_t len, const struct hos_sender *sender);
 
 void hos_get_state(struct hos_state *state);
