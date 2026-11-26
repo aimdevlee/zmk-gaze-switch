@@ -200,6 +200,12 @@ BLE 프로필이 연결되지 않은 상태에서 `B`를 보내면 ZMK가 USB를
 응답: `ZMK-HOS 1 <U|B> <프로필> <BLE 연결 0|1>`, 실패하면 `ZMK-HOS 1 ERR`.
 
 
+## 참고한 것
+
+HID 통신은 [zmk-raw-hid](https://github.com/zzeneg/zmk-raw-hid)와 ZMK 자체 HID 코드의 방식을 따랐습니다.
+USB HID 장치를 하나 더 두고, 블루투스에 HID 서비스를 하나 더 두는 방식입니다. 코드를 가져다 쓰지는 않았습니다.
+이 모듈은 명령을 누가 보냈는지 알아야 하고 그 연결로만 답해야 해서 따로 구현했습니다.
+
 ## 라이선스
 
 MIT

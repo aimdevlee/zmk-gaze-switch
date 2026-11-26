@@ -205,6 +205,12 @@ That is how a computer takes the keyboard back.
 Reply: `ZMK-HOS 1 <U|B> <profile> <BLE connected 0|1>`, or `ZMK-HOS 1 ERR` on failure.
 
 
+## Acknowledgements
+
+The HID transport follows the approach of [zmk-raw-hid](https://github.com/zzeneg/zmk-raw-hid) and of ZMK's own HID code:
+a second USB HID device and a second HID service over BLE. No code is shared; this module needs to know who sent
+a command and to answer on that link only, which is why it has its own.
+
 ## License
 
 MIT
