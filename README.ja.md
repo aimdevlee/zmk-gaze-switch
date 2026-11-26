@@ -9,6 +9,8 @@
 - MacBook の画面を見る → **この Mac**
 - もう一台のコンピュータのほうを見る → **BLE プロファイル n(もう一台)**
 
+<p align="center"><img src="docs/how-it-works/how-it-works-ja.png" width="800" alt="MacBook を見るとキーボードはこの Mac へ、もう一台を見るとそちらへ切り替わります。"></p>
+
 使い方は二通りあります。
 
 | | キーボードと Mac | 「この Mac」の意味 |

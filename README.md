@@ -9,6 +9,8 @@ Your keyboard's output follows the screen you are looking at.
 - Look at the MacBook screen → **this Mac**
 - Look toward the other computer → **BLE profile n (the other computer)**
 
+<p align="center"><img src="docs/how-it-works/how-it-works-en.png" width="800" alt="Looking at the MacBook sends the keyboard to this Mac; looking at the other computer sends it there."></p>
+
 It works in two ways.
 
 | | Keyboard and Mac | "This Mac" means |
