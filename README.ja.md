@@ -63,6 +63,7 @@ include:
 | `host-output-switch` | USB シリアルポート | いいえ |
 
 両方を書いてもかまいません。GazeSwitch は USB HID、USB シリアル、Bluetooth HID の順に選びます。
+GazeSwitch 0.2.2 以前はシリアルにしか対応していません。その場合は `host-output-switch` を外さないでください。
 `host-output-switch` を ZMK Studio と併用する場合は、`studio-rpc-usb-uart` を**先に**書いてください。
 
 ```yaml
@@ -76,7 +77,7 @@ include:
 - `host-output-switch-hid`
   - USB HID インターフェースをもう一つ(`CONFIG_USB_HID_DEVICE_COUNT=2`、デバイス `HID_1`)、Bluetooth にも HID サービスを
     もう一つ追加します。`HID_1` を使うほかのモジュール(例: `zmk-raw-hid`)とは衝突するので、
-    `CONFIG_ZMK_HOST_OUTPUT_SWITCH_HID_USB_DEVICE` でどちらかを移してください。
+    `CONFIG_ZMK_HOST_OUTPUT_SWITCH_HID_USB_DEVICE` でどちらかを移し、`CONFIG_USB_HID_DEVICE_COUNT` もそれに合わせて増やしてください。
   - `CONFIG_ZMK_HOST_OUTPUT_SWITCH_BLE_RECONNECT` も有効にします。ZMK は選択中のプロファイルが接続されるとアドバタイズを
     止めるため、別のプロファイルのコンピュータは接続が切れると(スリープ、Bluetooth オフ)戻ってこられません。
     このオプションを有効にすると、ペアリング済みのコンピュータが一台でも離れている間はアドバタイズを続けます。
@@ -186,6 +187,9 @@ BLE プロファイルが未接続のときに `B` を送ると、ZMK は USB �
 応答: `ZMK-HOS 2 <U|B> <プロファイル> <BLE 接続 0|1> <me 0|1> <送信元>`、失敗時は `ZMK-HOS 2 ERR`。
 `<me>` は、選択中の出力が送信元なら 1 です。`<送信元>` は USB なら `U`、Bluetooth なら送信元の BLE プロファイルです。
 Bluetooth の送信元がどのプロファイルにもない場合は `-` です(このとき `<me>` は 0 で、`M` は失敗します)。
+
+次のコマンドは応答を受け取ってから送ってください。キーボードが溜めておけるコマンドは数個までです。
+いっぱいのときに届いたコマンドは実行されず `ZMK-HOS 2 ERR` が返ります。この応答は、溜まっていたコマンドの応答のあとに届きます。
 
 Bluetooth では、選択中のプロファイルのコンピュータだけでなく、ペアリング済みのどのコンピュータからもコマンドを送れます。
 もう一台に切り替わっているキーボードを取り戻せるのはこのためです。

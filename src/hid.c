@@ -13,7 +13,9 @@
  * is on no profile (<me> is then 0, and M is answered with ERR).
  *
  * Every command gets one reply. A command that arrives while too many are
- * still waiting is not run and is answered with ERR.
+ * still waiting is not run and is answered with ERR -- after the replies to
+ * the ones that were waiting, so a host should wait for each reply before it
+ * sends the next command.
  *
  * Over BLE this is a second HID service next to ZMK's keyboard one. ZMK keeps
  * every bonded host connected, selected or not, so a host on a non-selected
@@ -33,6 +35,11 @@
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+
+#if IS_ENABLED(CONFIG_ZMK_USB)
+#include <zephyr/usb/usb_device.h>
+#include <zephyr/usb/class/usb_hid.h>
+#endif
 
 #include <zmk/ble.h>
 
@@ -61,26 +68,34 @@ static const uint8_t report_desc[] = {
     0xC0,                                     /* End Collection */
 };
 
-/* One received command, queued for the system work queue. */
+/* A reply (NUL terminated) as a report: the text, zero padded. */
+static void fill_report(uint8_t report[REPORT_SIZE], const char *text) {
+    memset(report, 0, REPORT_SIZE);
+    memcpy(report, text, MIN(strlen(text), REPORT_SIZE));
+}
+
+/* One received command, waiting for the system work queue. */
 struct request {
     struct bt_conn *conn; /* NULL: came over USB. Holds a reference otherwise. */
     uint8_t len;
     char text[REPORT_SIZE];
 };
 
-K_MSGQ_DEFINE(requests, sizeof(struct request), 4, 4);
+K_MSGQ_DEFINE(pending_requests, sizeof(struct request), 4, 4);
 
 /*
- * Commands that found the queue full, counted per sender so each still gets
- * its ERR: one slot per BLE connection, and the last one for USB.
+ * How many commands found the queue full, per sender, so that each still
+ * gets its ERR. A BLE sender is counted under its connection's index; the
+ * count is cleared when that connection ends, before the index is reused.
  */
-#define DROPPED_USB CONFIG_BT_MAX_CONN
-static atomic_t dropped[CONFIG_BT_MAX_CONN + 1];
+static atomic_t rejected_usb;
+static atomic_t rejected_ble[CONFIG_BT_MAX_CONN];
 
-static void process(struct k_work *work);
-static K_WORK_DEFINE(process_work, process);
+static void answer_requests(struct k_work *work);
+static K_WORK_DEFINE(answer_work, answer_requests);
 
-static void enqueue(struct bt_conn *conn, const uint8_t *data, size_t len) {
+/* Called where the command arrives (USB or BLE receive context): must not send or wait. */
+static void accept_command(struct bt_conn *conn, const uint8_t *data, size_t len) {
     struct request req = {.conn = conn != NULL ? bt_conn_ref(conn) : NULL};
 
     len = MIN(len, sizeof(req.text));
@@ -88,23 +103,19 @@ static void enqueue(struct bt_conn *conn, const uint8_t *data, size_t len) {
     /* The command is the text before the zero padding. */
     req.len = strnlen(req.text, len);
 
-    if (k_msgq_put(&requests, &req, K_NO_WAIT) != 0) {
-        LOG_WRN("command dropped, queue full");
-        /* We may not send from here (USB or BLE receive context); process() does. */
-        atomic_inc(&dropped[conn != NULL ? bt_conn_index(conn) : DROPPED_USB]);
+    if (k_msgq_put(&pending_requests, &req, K_NO_WAIT) != 0) {
+        LOG_WRN("command rejected, too many waiting");
+        atomic_inc(conn != NULL ? &rejected_ble[bt_conn_index(conn)] : &rejected_usb);
         if (req.conn != NULL) {
             bt_conn_unref(req.conn);
         }
     }
-    k_work_submit(&process_work);
+    k_work_submit(&answer_work);
 }
 
 /* ---- USB ---------------------------------------------------------------- */
 
 #if IS_ENABLED(CONFIG_ZMK_USB)
-
-#include <zephyr/usb/usb_device.h>
-#include <zephyr/usb/class/usb_hid.h>
 
 #define USB_REPORT_TYPE(setup) ((setup)->wValue >> 8)
 #define USB_REPORT_TYPE_OUTPUT 0x02
@@ -120,7 +131,7 @@ static int usb_set_report(const struct device *dev, struct usb_setup_packet *set
         return -ENOTSUP;
     }
     if (*len > 0) {
-        enqueue(NULL, *data, *len);
+        accept_command(NULL, *data, *len);
     }
     return 0;
 }
@@ -145,8 +156,7 @@ static void usb_reply(const char *text) {
      * was cancelled (cable pulled), nobody gives the semaphore back.
      */
     k_sem_take(&usb_in_idle, K_MSEC(50));
-    memset(report, 0, sizeof(report));
-    memcpy(report, text, MIN(strlen(text), sizeof(report)));
+    fill_report(report, text);
 
     if (hid_int_ep_write(usb_dev, report, sizeof(report), NULL) != 0) {
         k_sem_give(&usb_in_idle);
@@ -235,7 +245,7 @@ static ssize_t write_command(struct bt_conn *conn, const struct bt_gatt_attr *at
         return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
     }
     if (len > 0) {
-        enqueue(conn, buf, len);
+        accept_command(conn, buf, len);
     }
     return len;
 }
@@ -245,7 +255,13 @@ static ssize_t write_ctrl_point(struct bt_conn *conn, const struct bt_gatt_attr 
     return len;
 }
 
-/* attrs[5] is the reply characteristic; ble_reply() notifies on it. */
+/*
+ * Where the reply characteristic sits in the table below: the service is
+ * attribute 0, and the info and report map characteristics take two each.
+ * Move it together with the table.
+ */
+#define REPLY_ATTR_INDEX 5
+
 BT_GATT_SERVICE_DEFINE(
     hos_hog_svc, BT_GATT_PRIMARY_SERVICE(BT_UUID_HIDS),
     BT_GATT_CHARACTERISTIC(BT_UUID_HIDS_INFO, BT_GATT_CHRC_READ, BT_GATT_PERM_READ, read_info, NULL,
@@ -270,63 +286,84 @@ BT_GATT_SERVICE_DEFINE(
                            BT_GATT_PERM_WRITE, NULL, write_ctrl_point, NULL));
 
 static void ble_reply(struct bt_conn *conn, const char *text) {
-    uint8_t report[REPORT_SIZE] = {0};
+    uint8_t report[REPORT_SIZE];
 
-    memcpy(report, text, MIN(strlen(text), sizeof(report)));
+    fill_report(report, text);
 
-    int err = bt_gatt_notify(conn, &hos_hog_svc.attrs[5], report, sizeof(report));
+    int err = bt_gatt_notify(conn, &hos_hog_svc.attrs[REPLY_ATTR_INDEX], report, sizeof(report));
 
     if (err != 0) {
         LOG_DBG("reply not sent: %d", err);
     }
 }
 
+/* A connection's index is free for the next host once it ends; its count must not follow. */
+static void forget_rejected(struct bt_conn *conn, uint8_t reason) {
+    atomic_clear(&rejected_ble[bt_conn_index(conn)]);
+}
+
+BT_CONN_CB_DEFINE(hos_hid_conn_cb) = {
+    .disconnected = forget_rejected,
+};
+
 /* ---- both ---------------------------------------------------------------- */
 
-static const char rejected[] = "ZMK-HOS 2 ERR";
+static const char error_reply[] = "ZMK-HOS 2 ERR";
 
-static void reject_dropped_ble(struct bt_conn *conn, void *data) {
-    for (atomic_val_t n = atomic_clear(&dropped[bt_conn_index(conn)]); n > 0; n--) {
-        ble_reply(conn, rejected);
+static void answer_rejected_ble(struct bt_conn *conn, void *data) {
+    for (atomic_val_t n = atomic_clear(&rejected_ble[bt_conn_index(conn)]); n > 0; n--) {
+        ble_reply(conn, error_reply);
     }
 }
 
-static void reject_dropped(void) {
-    for (atomic_val_t n = atomic_clear(&dropped[DROPPED_USB]); n > 0; n--) {
-        usb_reply(rejected);
+static void answer_rejected(void) {
+    for (atomic_val_t n = atomic_clear(&rejected_usb); n > 0; n--) {
+        usb_reply(error_reply);
     }
-    bt_conn_foreach(BT_CONN_TYPE_LE, reject_dropped_ble, NULL);
+    bt_conn_foreach(BT_CONN_TYPE_LE, answer_rejected_ble, NULL);
 }
 
-static void process(struct k_work *work) {
+static struct hos_sender sender_of(const struct request *req) {
+    struct hos_sender sender = {.ble = req->conn != NULL, .profile = HOS_NO_PROFILE};
+
+    if (req->conn != NULL) {
+        int index = zmk_ble_profile_index(bt_conn_get_dst(req->conn));
+
+        if (index >= 0) {
+            sender.profile = index;
+        }
+    }
+    return sender;
+}
+
+static void format_reply(char *out, size_t size, const struct hos_sender *sender) {
+    struct hos_state state;
+    char state_text[16];
+    char sender_text[8] = "-";
+
+    hos_get_state(&state);
+    hos_format_state(state_text, sizeof(state_text), &state);
+    if (!sender->ble) {
+        snprintf(sender_text, sizeof(sender_text), "U");
+    } else if (sender->profile != HOS_NO_PROFILE) {
+        snprintf(sender_text, sizeof(sender_text), "%d", sender->profile);
+    }
+    snprintf(out, size, "ZMK-HOS 2 %s %d %s", state_text,
+             hos_output_is_sender(&state, sender) ? 1 : 0, sender_text);
+}
+
+static void answer_requests(struct k_work *work) {
     struct request req;
 
-    while (k_msgq_get(&requests, &req, K_NO_WAIT) == 0) {
-        struct hos_sender from = {.ble = req.conn != NULL, .profile = -1};
+    while (k_msgq_get(&pending_requests, &req, K_NO_WAIT) == 0) {
+        struct hos_sender sender = sender_of(&req);
+        /* Roomier than a report so the compiler can see nothing is cut; real replies fit. */
+        char out[2 * REPORT_SIZE];
 
-        if (req.conn != NULL) {
-            int index = zmk_ble_profile_index(bt_conn_get_dst(req.conn));
-
-            from.profile = index >= 0 ? index : -1;
-        }
-
-        char out[REPORT_SIZE + 1];
-
-        if (hos_run(req.text, req.len, &from) != 0) {
-            snprintf(out, sizeof(out), "%s", rejected);
+        if (hos_run(req.text, req.len, &sender) != 0) {
+            snprintf(out, sizeof(out), "%s", error_reply);
         } else {
-            struct hos_state state;
-            char sender[4] = "-";
-
-            hos_get_state(&state);
-            if (!from.ble) {
-                snprintf(sender, sizeof(sender), "U");
-            } else if (from.profile >= 0) {
-                snprintf(sender, sizeof(sender), "%d", from.profile % 100);
-            }
-            snprintf(out, sizeof(out), "ZMK-HOS 2 %c %d %d %d %s", state.usb ? 'U' : 'B',
-                     state.profile, state.connected ? 1 : 0, hos_points_at(&state, &from) ? 1 : 0,
-                     sender);
+            format_reply(out, sizeof(out), &sender);
         }
 
         if (req.conn != NULL) {
@@ -336,6 +373,6 @@ static void process(struct k_work *work) {
             usb_reply(out);
         }
     }
-    /* After the queued ones: the dropped commands arrived later. */
-    reject_dropped();
+    /* After the waiting ones: the rejected commands arrived later. */
+    answer_rejected();
 }

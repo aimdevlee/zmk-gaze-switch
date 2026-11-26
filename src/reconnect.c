@@ -30,12 +30,15 @@
 
 LOG_MODULE_DECLARE(zmk_host_output_switch, CONFIG_ZMK_LOG_LEVEL);
 
-/* Runs after ZMK's own advertising update, which the same events trigger. */
-#define SETTLE K_MSEC(500)
-#define RETRY K_SECONDS(2)
+/* Long enough for ZMK's own advertising update, which the same events trigger, to run first. */
+#define AFTER_ZMK_DELAY K_MSEC(500)
+#define RETRY_DELAY K_SECONDS(2)
 
-/* Same as ZMK's zmk_ble_ad and ZMK_ADV_CONN_NAME in app/src/ble.c. */
-static const struct bt_data ad[] = {
+/*
+ * Copies of ZMK's zmk_ble_ad and ZMK_ADV_CONN_NAME in app/src/ble.c. Both are
+ * private to that file, so they cannot be shared; keep them in step with it.
+ */
+static const struct bt_data adv_data[] = {
     BT_DATA_BYTES(BT_DATA_GAP_APPEARANCE, 0xC1, 0x03),
     BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
     BT_DATA_BYTES(BT_DATA_UUID16_SOME, 0x12, 0x18, /* HID Service */
@@ -59,10 +62,10 @@ static bool bonded_host_missing(void) {
     return false;
 }
 
-static void check(struct k_work *work);
-static K_WORK_DELAYABLE_DEFINE(check_work, check);
+static void advertise_for_missing_host(struct k_work *work);
+static K_WORK_DELAYABLE_DEFINE(advertise_work, advertise_for_missing_host);
 
-static void check(struct k_work *work) {
+static void advertise_for_missing_host(struct k_work *work) {
     if (!bonded_host_missing()) {
         /*
          * Nobody left to wait for (the host came back, or its bond was
@@ -76,14 +79,14 @@ static void check(struct k_work *work) {
         return;
     }
 
-    int err = bt_le_adv_start(ADV_PARAM, ad, ARRAY_SIZE(ad), NULL, 0);
+    int err = bt_le_adv_start(ADV_PARAM, adv_data, ARRAY_SIZE(adv_data), NULL, 0);
 
     if (err == 0) {
         started_by_us = true;
         LOG_DBG("advertising for a bonded host on a non-selected profile");
     } else if (err != -EALREADY) {
         LOG_WRN("advertising failed to start (%d), retrying", err);
-        k_work_reschedule(&check_work, RETRY);
+        k_work_reschedule(&advertise_work, RETRY_DELAY);
     }
 }
 
@@ -91,10 +94,11 @@ static void on_link_change(struct bt_conn *conn) {
     struct bt_conn_info info;
 
     if (bt_conn_get_info(conn, &info) == 0 && info.role == BT_CONN_ROLE_PERIPHERAL) {
-        k_work_reschedule(&check_work, SETTLE);
+        k_work_reschedule(&advertise_work, AFTER_ZMK_DELAY);
     }
 }
 
+/* The two callbacks have different signatures, so each needs its own forwarder. */
 static void connected(struct bt_conn *conn, uint8_t err) { on_link_change(conn); }
 
 static void disconnected(struct bt_conn *conn, uint8_t reason) { on_link_change(conn); }
@@ -106,7 +110,7 @@ BT_CONN_CB_DEFINE(hos_reconnect_conn_cb) = {
 
 /* Raised on profile selection, and when a profile's bond is set or cleared. */
 static int on_profile_changed(const zmk_event_t *eh) {
-    k_work_reschedule(&check_work, SETTLE);
+    k_work_reschedule(&advertise_work, AFTER_ZMK_DELAY);
     return ZMK_EV_EVENT_BUBBLE;
 }
 

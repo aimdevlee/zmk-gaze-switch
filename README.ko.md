@@ -63,6 +63,7 @@ include:
 | `host-output-switch` | USB 시리얼 포트 | 아니요 |
 
 둘을 함께 적어도 됩니다. GazeSwitch는 USB HID, USB 시리얼, 블루투스 HID 순으로 고릅니다.
+GazeSwitch 0.2.2 이하는 시리얼만 압니다. 그 버전을 쓴다면 `host-output-switch`를 빼지 마세요.
 `host-output-switch`를 ZMK Studio와 같이 쓴다면 `studio-rpc-usb-uart`를 **앞에** 적으세요.
 
 ```yaml
@@ -76,7 +77,7 @@ include:
 - `host-output-switch-hid`
   - USB HID 인터페이스를 하나 더 만들고(`CONFIG_USB_HID_DEVICE_COUNT=2`, 장치 `HID_1`), 블루투스에도 HID 서비스를
     하나 더 만듭니다. `HID_1`을 쓰는 다른 모듈(예: `zmk-raw-hid`)과는 충돌하니,
-    `CONFIG_ZMK_HOST_OUTPUT_SWITCH_HID_USB_DEVICE`로 한쪽을 옮기세요.
+    `CONFIG_ZMK_HOST_OUTPUT_SWITCH_HID_USB_DEVICE`로 한쪽을 옮기고 `CONFIG_USB_HID_DEVICE_COUNT`도 그만큼 올리세요.
   - `CONFIG_ZMK_HOST_OUTPUT_SWITCH_BLE_RECONNECT`도 함께 켭니다. ZMK는 선택된 프로필이 연결되면 광고를 멈추기 때문에,
     다른 프로필의 컴퓨터는 연결이 끊기면(잠자기, 블루투스 끔) 다시 들어오지 못합니다. 이 옵션을 켜면 페어링된
     컴퓨터가 하나라도 떨어져 있는 동안 광고를 계속합니다. **그만큼 배터리를 더 씁니다.** 케이블로만 쓴다면
@@ -185,6 +186,9 @@ BLE 프로필이 연결되지 않은 상태에서 `B`를 보내면 ZMK가 USB를
 응답: `ZMK-HOS 2 <U|B> <프로필> <BLE 연결 0|1> <me 0|1> <보낸 쪽>`, 실패하면 `ZMK-HOS 2 ERR`.
 `<me>`는 선택된 출력이 보낸 쪽이면 1입니다. `<보낸 쪽>`은 USB면 `U`, 블루투스면 보낸 컴퓨터의 BLE 프로필입니다.
 블루투스로 보낸 컴퓨터가 어느 프로필에도 없으면 `-`입니다(이때 `<me>`는 0이고 `M`은 실패합니다).
+
+다음 명령은 응답을 받은 뒤에 보내세요. 키보드는 명령을 몇 개까지만 쌓아 둡니다. 가득 찼을 때 온 명령은
+실행하지 않고 `ZMK-HOS 2 ERR`로 답하며, 이 응답은 쌓여 있던 명령들의 응답 뒤에 옵니다.
 
 블루투스에서는 선택된 프로필의 컴퓨터뿐 아니라 페어링된 어느 컴퓨터든 명령을 보낼 수 있습니다.
 다른 컴퓨터에 가 있는 키보드를 되찾아 올 수 있는 이유입니다.

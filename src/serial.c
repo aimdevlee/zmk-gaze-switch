@@ -86,11 +86,12 @@ static void run_command(const char *cmd, size_t len) {
      * may not be connected yet; the host can poll with '?' to watch it.
      */
     struct hos_state state;
+    char text[16];
     char out[48];
 
     hos_get_state(&state);
-    int n = snprintf(out, sizeof(out), "ZMK-HOS 1 %c %d %d\n", state.usb ? 'U' : 'B',
-                     state.profile, state.connected ? 1 : 0);
+    hos_format_state(text, sizeof(text), &state);
+    int n = snprintf(out, sizeof(out), "ZMK-HOS 1 %s\n", text);
 
     if (n > 0) {
         send_reply(out, MIN((size_t)n, sizeof(out) - 1));
@@ -157,7 +158,7 @@ static void uart_isr(const struct device *dev, void *user_data) {
     }
 }
 
-static int host_output_switch_init(void) {
+static int serial_init(void) {
     if (!device_is_ready(uart_dev)) {
         LOG_ERR("CDC ACM device not ready");
         return -ENODEV;
@@ -169,4 +170,4 @@ static int host_output_switch_init(void) {
     return 0;
 }
 
-SYS_INIT(host_output_switch_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
+SYS_INIT(serial_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);

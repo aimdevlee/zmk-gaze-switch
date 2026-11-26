@@ -63,6 +63,7 @@ include:
 | `host-output-switch` | A USB serial port | No |
 
 You can list both. GazeSwitch prefers USB HID, then USB serial, then Bluetooth HID.
+GazeSwitch 0.2.2 and earlier only speak serial; with those, keep `host-output-switch` in the list.
 If you also use ZMK Studio together with `host-output-switch`, list `studio-rpc-usb-uart` **first**.
 
 ```yaml
@@ -76,7 +77,7 @@ If you also use ZMK Studio together with `host-output-switch`, list `studio-rpc-
 - `host-output-switch-hid`
   - It adds a second USB HID interface (`CONFIG_USB_HID_DEVICE_COUNT=2`, device `HID_1`) and a second
     HID service over Bluetooth. Another module that claims `HID_1` (for example `zmk-raw-hid`) conflicts with it;
-    move one of them with `CONFIG_ZMK_HOST_OUTPUT_SWITCH_HID_USB_DEVICE`.
+    move one of them with `CONFIG_ZMK_HOST_OUTPUT_SWITCH_HID_USB_DEVICE` and raise `CONFIG_USB_HID_DEVICE_COUNT` to match.
   - It also turns on `CONFIG_ZMK_HOST_OUTPUT_SWITCH_BLE_RECONNECT`. ZMK normally stops advertising once the
     selected profile is connected, so a computer on another profile that drops its link (sleep, Bluetooth off)
     could not come back. With this option the keyboard keeps advertising while any paired computer is away.
@@ -190,6 +191,9 @@ Write the command as ASCII in an output report, zero padded. One input report co
 Reply: `ZMK-HOS 2 <U|B> <profile> <BLE connected 0|1> <me 0|1> <sender>`, or `ZMK-HOS 2 ERR` on failure.
 `<me>` is 1 when the selected output is the sender. `<sender>` is `U` over USB, the sender's BLE profile over Bluetooth, or `-` when a Bluetooth sender is on no profile
 (`<me>` is then 0 and `M` fails).
+
+Wait for the reply before you send the next command. The keyboard holds a few commands at most; one that arrives
+while it is full is not run and gets `ZMK-HOS 2 ERR`, after the replies to the ones it was holding.
 
 Over Bluetooth, any paired computer can send commands, not only the one on the selected profile.
 That is how a computer takes the keyboard back.

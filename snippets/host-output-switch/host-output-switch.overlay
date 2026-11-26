@@ -1,5 +1,5 @@
 /*
- * A CDC ACM port used only by src/host_output_switch.c.
+ * A CDC ACM port used only by src/serial.c.
  *
  * When combined with studio-rpc-usb-uart, list that snippet first so the
  * Studio port keeps the first interface. Anything else that assumes a single

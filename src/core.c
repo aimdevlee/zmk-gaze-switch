@@ -17,6 +17,7 @@
  */
 
 #include <errno.h>
+#include <stdio.h>
 
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -28,18 +29,32 @@
 
 LOG_MODULE_REGISTER(zmk_host_output_switch, CONFIG_ZMK_LOG_LEVEL);
 
-static int select_ble(int profile) {
-    if (profile >= 0) {
-        int err = zmk_ble_prof_select((uint8_t)profile);
+static int select_ble_output(void) { return zmk_endpoints_select_transport(ZMK_TRANSPORT_BLE); }
 
-        if (err != 0) {
-            return err;
-        }
-    }
-    return zmk_endpoints_select_transport(ZMK_TRANSPORT_BLE);
+static int select_ble_profile(int profile) {
+    int err = zmk_ble_prof_select((uint8_t)profile);
+
+    return err != 0 ? err : select_ble_output();
 }
 
-int hos_run(const char *cmd, size_t len, const struct hos_sender *from) {
+/* The profile index written in decimal digits, or -EINVAL. */
+static int parse_profile(const char *digits, size_t len) {
+    int profile = 0;
+
+    for (size_t i = 0; i < len; i++) {
+        if (digits[i] < '0' || digits[i] > '9') {
+            return -EINVAL;
+        }
+        profile = profile * 10 + (digits[i] - '0');
+        /* Checked at every digit, so a long number cannot wrap around. */
+        if (profile >= ZMK_BLE_PROFILE_COUNT) {
+            return -EINVAL;
+        }
+    }
+    return profile;
+}
+
+int hos_run(const char *cmd, size_t len, const struct hos_sender *sender) {
     if (len == 0) {
         return -EINVAL;
     }
@@ -53,32 +68,26 @@ int hos_run(const char *cmd, size_t len, const struct hos_sender *from) {
         break;
 
     case 'B':
-    case 'b': {
-        int profile = -1;
+    case 'b':
+        if (len == 1) {
+            err = select_ble_output();
+        } else {
+            int profile = parse_profile(cmd + 1, len - 1);
 
-        if (len > 1) {
-            profile = 0;
-            for (size_t i = 1; i < len; i++) {
-                if (cmd[i] < '0' || cmd[i] > '9' || profile > 99) {
-                    return -EINVAL;
-                }
-                profile = profile * 10 + (cmd[i] - '0');
-            }
+            err = profile < 0 ? profile : select_ble_profile(profile);
         }
-        err = select_ble(profile);
         break;
-    }
 
     case 'M':
     case 'm':
         if (len != 1) {
             err = -EINVAL;
-        } else if (!from->ble) {
+        } else if (!sender->ble) {
             err = zmk_endpoints_select_transport(ZMK_TRANSPORT_USB);
-        } else if (from->profile < 0) {
+        } else if (sender->profile == HOS_NO_PROFILE) {
             err = -ENODEV;
         } else {
-            err = select_ble(from->profile);
+            err = select_ble_profile(sender->profile);
         }
         break;
 
@@ -104,9 +113,14 @@ void hos_get_state(struct hos_state *state) {
     state->connected = zmk_ble_active_profile_is_connected();
 }
 
-bool hos_points_at(const struct hos_state *state, const struct hos_sender *who) {
-    if (!who->ble) {
+bool hos_output_is_sender(const struct hos_state *state, const struct hos_sender *sender) {
+    if (!sender->ble) {
         return state->usb;
     }
-    return !state->usb && who->profile >= 0 && who->profile == state->profile;
+    return !state->usb && sender->profile != HOS_NO_PROFILE && sender->profile == state->profile;
+}
+
+void hos_format_state(char *out, size_t size, const struct hos_state *state) {
+    snprintf(out, size, "%c %d %d", state->usb ? 'U' : 'B', state->profile,
+             state->connected ? 1 : 0);
 }
