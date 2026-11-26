@@ -8,10 +8,11 @@
  * disconnected and ZMK is not advertising, we advertise in its place, with
  * the same data ZMK uses.
  *
- * ZMK does not know about this. It tolerates it: if it later wants to
- * advertise itself, bt_le_adv_start() reports -EALREADY and the advertising
- * that is already running does the job; if it stops advertising, the next
- * connection or profile event brings us back here.
+ * ZMK does not know about this. If it wants to advertise while we already do,
+ * its bt_le_adv_start() reports -EALREADY and it does not try again, so from
+ * then on our advertising also serves the selected profile: we keep it at
+ * ZMK's interval for as long as ZMK wants any. If ZMK stops advertising, the
+ * next connection or profile event brings us back here.
  *
  * Pairing is not affected. ZMK still rejects pairing unless the selected
  * profile is open.
@@ -38,14 +39,14 @@ LOG_MODULE_DECLARE(zmk_host_output_switch, CONFIG_ZMK_LOG_LEVEL);
  * Advertising shares the radio with the links that carry keys and pointer
  * movement, and at ZMK's interval it makes a trackball visibly lag. A host
  * that just dropped is likely to come straight back (Bluetooth switched off
- * and on), so we advertise at that interval for a short while, then slowly
- * for as long as a host stays away.
+ * and on), so it gets that interval for a short while. After that we advertise
+ * slowly, unless ZMK wants advertising for the selected profile.
  */
-#define FAST_PERIOD_MS (30 * MSEC_PER_SEC)
+#define FAST_PERIOD K_SECONDS(30)
 
 /*
- * Copies of ZMK's zmk_ble_ad and ZMK_ADV_CONN_NAME in app/src/ble.c. Both are
- * private to that file, so they cannot be shared; keep them in step with it.
+ * Copy of ZMK's zmk_ble_ad in app/src/ble.c. It is private to that file, so
+ * it cannot be shared; keep it in step.
  */
 static const struct bt_data adv_data[] = {
     BT_DATA_BYTES(BT_DATA_GAP_APPEARANCE, 0xC1, 0x03),
@@ -59,16 +60,22 @@ static const struct bt_data adv_data[] = {
     (BT_LE_ADV_OPT_CONNECTABLE | BT_LE_ADV_OPT_ONE_TIME | BT_LE_ADV_OPT_USE_NAME |                 \
      BT_LE_ADV_OPT_FORCE_NAME_IN_AD)
 
+/* The same as ZMK's ZMK_ADV_CONN_NAME, also private to ble.c. */
 #define ADV_PARAM_FAST                                                                             \
     BT_LE_ADV_PARAM(ADV_OPTIONS, BT_GAP_ADV_FAST_INT_MIN_2, BT_GAP_ADV_FAST_INT_MAX_2, NULL)
 #define ADV_PARAM_SLOW                                                                             \
     BT_LE_ADV_PARAM(ADV_OPTIONS, BT_GAP_ADV_SLOW_INT_MIN, BT_GAP_ADV_SLOW_INT_MAX, NULL)
 
-/* Advertising that we started and, as far as we know, is still running. */
-static bool started_by_us;
-static bool started_fast;
-/* Uptime until which a host that dropped is given the fast interval. */
-static int64_t fast_until;
+enum pace {
+    NOT_ADVERTISING,
+    FAST,
+    SLOW,
+};
+
+/* The advertising that we started and, as far as we know, is still running. */
+static enum pace ours;
+/* Until when a host that dropped is given the fast interval. */
+static k_timepoint_t fast_until;
 
 static bool bonded_host_missing(void) {
     for (int i = 0; i < ZMK_BLE_PROFILE_COUNT; i++) {
@@ -83,66 +90,73 @@ static void advertise_for_missing_host(struct k_work *work);
 static K_WORK_DELAYABLE_DEFINE(advertise_work, advertise_for_missing_host);
 
 static void advertise_for_missing_host(struct k_work *work) {
-    /*
-     * While the selected profile is connected ZMK wants no advertising, so
-     * whatever runs is ours to stop. Otherwise it may be ZMK's by now.
-     */
-    bool ours_to_stop = started_by_us && zmk_ble_active_profile_is_connected();
+    /* ZMK wants advertising exactly while the selected profile has no host. */
+    bool zmk_wants_some = !zmk_ble_active_profile_is_connected();
+    bool in_fast_period = !sys_timepoint_expired(fast_until);
 
-    if (!bonded_host_missing()) {
+    if (!zmk_wants_some && !bonded_host_missing()) {
         /* Nobody left to wait for (the host came back, or its bond was cleared). */
-        if (ours_to_stop) {
+        if (ours != NOT_ADVERTISING) {
             bt_le_adv_stop();
         }
-        started_by_us = false;
+        ours = NOT_ADVERTISING;
         return;
     }
 
-    int64_t fast_left = fast_until - k_uptime_get();
-    bool fast = fast_left > 0;
+    enum pace wanted = (zmk_wants_some || in_fast_period) ? FAST : SLOW;
 
-    if (ours_to_stop && started_fast != fast) {
-        /* Restart at the other interval. */
+    if (ours != NOT_ADVERTISING && ours != wanted) {
+        /*
+         * Restart at the other interval. What runs may be ZMK's by now, but
+         * only when we want FAST, which is what ZMK's is: we start the same
+         * again right below, and retry if that fails.
+         */
         bt_le_adv_stop();
-        started_by_us = false;
+        ours = NOT_ADVERTISING;
     }
 
-    int err = bt_le_adv_start(fast ? ADV_PARAM_FAST : ADV_PARAM_SLOW, adv_data,
+    int err = bt_le_adv_start(wanted == FAST ? ADV_PARAM_FAST : ADV_PARAM_SLOW, adv_data,
                               ARRAY_SIZE(adv_data), NULL, 0);
 
     if (err == 0) {
-        started_by_us = true;
-        started_fast = fast;
-        LOG_DBG("advertising %s for a bonded host on a non-selected profile",
-                fast ? "fast" : "slowly");
+        ours = wanted;
+        LOG_DBG("advertising %s for a host that is away", wanted == FAST ? "fast" : "slowly");
     } else if (err != -EALREADY) {
         LOG_WRN("advertising failed to start (%d), retrying", err);
         k_work_reschedule(&advertise_work, RETRY_DELAY);
         return;
     }
-    if (fast) {
-        /* Come back to slow down. */
-        k_work_reschedule(&advertise_work, K_MSEC(fast_left + 1));
+    if (!zmk_wants_some && in_fast_period) {
+        /* Come back when the fast period ends, to slow down. */
+        k_work_reschedule(&advertise_work, sys_timepoint_timeout(fast_until));
     }
 }
 
-/* A host connected or dropped. (Links to the other half of a split keyboard are not hosts.) */
-static void on_host_link_change(struct bt_conn *conn, bool dropped) {
+/* Links to the other half of a split keyboard are not hosts. */
+static bool is_host_link(struct bt_conn *conn) {
     struct bt_conn_info info;
 
-    if (bt_conn_get_info(conn, &info) != 0 || info.role != BT_CONN_ROLE_PERIPHERAL) {
+    return bt_conn_get_info(conn, &info) == 0 && info.role == BT_CONN_ROLE_PERIPHERAL;
+}
+
+static void connected(struct bt_conn *conn, uint8_t err) {
+    if (!is_host_link(conn)) {
         return;
     }
-    if (dropped) {
-        fast_until = k_uptime_get() + FAST_PERIOD_MS;
+    if (err == 0) {
+        /* Our advertising is one-time: a connection ends it. */
+        ours = NOT_ADVERTISING;
     }
     k_work_reschedule(&advertise_work, AFTER_ZMK_DELAY);
 }
 
-/* The two callbacks have different signatures, so each needs its own forwarder. */
-static void connected(struct bt_conn *conn, uint8_t err) { on_host_link_change(conn, false); }
-
-static void disconnected(struct bt_conn *conn, uint8_t reason) { on_host_link_change(conn, true); }
+static void disconnected(struct bt_conn *conn, uint8_t reason) {
+    if (!is_host_link(conn)) {
+        return;
+    }
+    fast_until = sys_timepoint_calc(FAST_PERIOD);
+    k_work_reschedule(&advertise_work, AFTER_ZMK_DELAY);
+}
 
 BT_CONN_CB_DEFINE(hos_reconnect_conn_cb) = {
     .connected = connected,

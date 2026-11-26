@@ -81,8 +81,9 @@ If you also use ZMK Studio together with `host-output-switch`, list `studio-rpc-
   - It also turns on `CONFIG_ZMK_HOST_OUTPUT_SWITCH_BLE_RECONNECT`. ZMK normally stops advertising once the
     selected profile is connected, so a computer on another profile that drops its link (sleep, Bluetooth off)
     could not come back. With this option the keyboard keeps advertising while any paired computer is away:
-    quickly for 30 seconds after one drops, then about once a second, so that a trackball or trackpad on the keyboard
-    stays smooth. **That costs battery.** Set it to `n` in your `.conf` if you only ever use the cable.
+    quickly for 30 seconds after one drops and while the selected computer is away, about once a second otherwise,
+    so that a trackball or trackpad on the keyboard stays smooth. A computer that was away for longer can take a
+    few seconds more to reconnect. **That costs battery.** Set it to `n` in your `.conf` if you only ever use the cable.
   - After flashing, a computer that was already paired may keep the old HID layout until its Bluetooth is
     switched off and on once.
 - `host-output-switch`
