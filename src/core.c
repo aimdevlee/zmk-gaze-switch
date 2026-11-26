@@ -29,12 +29,53 @@
 
 LOG_MODULE_REGISTER(zmk_host_output_switch, CONFIG_ZMK_LOG_LEVEL);
 
-static int select_ble_output(void) { return zmk_endpoints_select_transport(ZMK_TRANSPORT_BLE); }
+/*
+ * How long ZMK's BLE sender gets to take a queued report. It runs on its own,
+ * lower-priority thread, so it only runs once we sleep.
+ */
+#define BLE_SEND_GRACE K_MSEC(10)
+
+/*
+ * Releases every held key on the output we are about to leave.
+ *
+ * ZMK does this itself when the output changes, but over BLE the release is
+ * only queued, and sent later to whichever profile is active by then. After a
+ * profile change that is the new host: the old one keeps the key down and
+ * repeats it for as long as it stays away. A host can switch while the user is
+ * typing, so we queue the release first and let it leave before we switch.
+ */
+static void leave_output_unless(bool already_there) {
+    if (already_there) {
+        return;
+    }
+    bool over_ble = zmk_endpoints_selected().transport == ZMK_TRANSPORT_BLE;
+
+    zmk_endpoints_clear_current();
+    if (over_ble) {
+        k_sleep(BLE_SEND_GRACE);
+    }
+}
+
+static bool output_is(enum zmk_transport transport) {
+    return zmk_endpoints_selected().transport == transport;
+}
+
+static int select_usb_output(void) {
+    leave_output_unless(output_is(ZMK_TRANSPORT_USB));
+    return zmk_endpoints_select_transport(ZMK_TRANSPORT_USB);
+}
+
+static int select_ble_output(void) {
+    leave_output_unless(output_is(ZMK_TRANSPORT_BLE));
+    return zmk_endpoints_select_transport(ZMK_TRANSPORT_BLE);
+}
 
 static int select_ble_profile(int profile) {
+    leave_output_unless(output_is(ZMK_TRANSPORT_BLE) && zmk_ble_active_profile_index() == profile);
+
     int err = zmk_ble_prof_select((uint8_t)profile);
 
-    return err != 0 ? err : select_ble_output();
+    return err != 0 ? err : zmk_endpoints_select_transport(ZMK_TRANSPORT_BLE);
 }
 
 /* The profile index written in decimal digits, or -EINVAL. */
@@ -64,7 +105,7 @@ int hos_run(const char *cmd, size_t len, const struct hos_sender *sender) {
     switch (cmd[0]) {
     case 'U':
     case 'u':
-        err = zmk_endpoints_select_transport(ZMK_TRANSPORT_USB);
+        err = select_usb_output();
         break;
 
     case 'B':
@@ -83,7 +124,7 @@ int hos_run(const char *cmd, size_t len, const struct hos_sender *sender) {
         if (len != 1) {
             err = -EINVAL;
         } else if (!sender->ble) {
-            err = zmk_endpoints_select_transport(ZMK_TRANSPORT_USB);
+            err = select_usb_output();
         } else if (sender->profile == HOS_NO_PROFILE) {
             err = -ENODEV;
         } else {
