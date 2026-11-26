@@ -50,7 +50,9 @@ config ZMK_HOST_OUTPUT_SWITCH_BLE_RECONNECT
       ZMK stops advertising once the selected profile is connected, so a
       host on another profile that drops (sleep, Bluetooth off) cannot come
       back until its profile is selected. With this option the keyboard keeps
-      advertising while any bonded profile is disconnected.
+      advertising while any bonded profile is disconnected: at ZMK's interval
+      for 30 seconds after a host drops, then about once a second, so that a
+      pointing device on the keyboard stays smooth.
 
       Needed to drive the switch over BLE alone. Pairing is unchanged: new
       hosts are still only accepted into an open, selected profile. Costs
