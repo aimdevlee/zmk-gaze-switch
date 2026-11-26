@@ -1,18 +1,12 @@
 /*
- * Host-driven output switch.
+ * Host-driven output switch: USB serial transport.
  *
  * The central half stays plugged into one computer over USB. That computer
- * writes short commands to a dedicated CDC ACM port to move the keyboard's
- * output between USB (itself) and a BLE profile (another computer):
- *
- *   U      select the USB output
- *   B      select the BLE output, keeping the current profile
- *   B<n>   select BLE profile n, then the BLE output
- *   ?      no change, report state
- *
- * Commands end with '\n' or '\r'. Each one is answered with a single line:
+ * writes the commands from core.c to a dedicated CDC ACM port, each ended by
+ * '\n' or '\r', and gets a single line back:
  *
  *   ZMK-HOS 1 <U|B> <profile> <ble-connected 0|1>\n
+ *   ZMK-HOS 1 ERR\n
  *
  * The first field identifies this port, so the host can tell it apart from
  * the ZMK Studio port that shares the same USB device.
@@ -29,15 +23,14 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/ring_buffer.h>
 
-#include <zmk/ble.h>
-#include <zmk/endpoints.h>
+#include "hos.h"
 
-LOG_MODULE_REGISTER(zmk_host_output_switch, CONFIG_ZMK_LOG_LEVEL);
+LOG_MODULE_DECLARE(zmk_host_output_switch, CONFIG_ZMK_LOG_LEVEL);
 
 #define HOS_NODE DT_CHOSEN(zmk_host_output_switch_uart)
 
 #if !DT_NODE_EXISTS(HOS_NODE)
-#error "host-output-switch needs the zmk,host-output-switch-uart chosen node"
+#error "the serial transport needs the zmk,host-output-switch-uart chosen node"
 #endif
 
 #define CMD_MAX 16
@@ -75,63 +68,14 @@ static void send_reply(const char *text, size_t len) {
     uart_irq_tx_enable(uart_dev);
 }
 
-static void report_state(void) {
-    struct zmk_endpoint_instance ep = zmk_endpoints_selected();
-    char out[48];
-    int len = snprintf(out, sizeof(out), "ZMK-HOS 1 %c %d %d\n",
-                       ep.transport == ZMK_TRANSPORT_BLE ? 'B' : 'U',
-                       zmk_ble_active_profile_index(),
-                       zmk_ble_active_profile_is_connected() ? 1 : 0);
-
-    if (len > 0) {
-        send_reply(out, MIN((size_t)len, sizeof(out) - 1));
-    }
-}
-
 static void run_command(const char *cmd, size_t len) {
+    static const struct hos_sender usb_host = {.ble = false, .profile = -1};
+
     if (len == 0) {
         return;
     }
 
-    int err = 0;
-
-    switch (cmd[0]) {
-    case 'U':
-    case 'u':
-        err = zmk_endpoints_select_transport(ZMK_TRANSPORT_USB);
-        break;
-
-    case 'B':
-    case 'b':
-        if (len > 1) {
-            int profile = 0;
-
-            for (size_t i = 1; i < len; i++) {
-                if (cmd[i] < '0' || cmd[i] > '9') {
-                    err = -EINVAL;
-                    break;
-                }
-                profile = profile * 10 + (cmd[i] - '0');
-            }
-            if (err == 0) {
-                err = zmk_ble_prof_select((uint8_t)profile);
-            }
-        }
-        if (err == 0) {
-            err = zmk_endpoints_select_transport(ZMK_TRANSPORT_BLE);
-        }
-        break;
-
-    case '?':
-        break;
-
-    default:
-        err = -EINVAL;
-        break;
-    }
-
-    if (err != 0) {
-        LOG_WRN("command '%.*s' failed: %d", (int)len, cmd, err);
+    if (hos_run(cmd, len, &usb_host) != 0) {
         static const char bad[] = "ZMK-HOS 1 ERR\n";
         send_reply(bad, sizeof(bad) - 1);
         return;
@@ -141,7 +85,16 @@ static void run_command(const char *cmd, size_t len) {
      * The endpoint change is applied synchronously, but a fresh BLE profile
      * may not be connected yet; the host can poll with '?' to watch it.
      */
-    report_state();
+    struct hos_state state;
+    char out[48];
+
+    hos_get_state(&state);
+    int n = snprintf(out, sizeof(out), "ZMK-HOS 1 %c %d %d\n", state.usb ? 'U' : 'B',
+                     state.profile, state.connected ? 1 : 0);
+
+    if (n > 0) {
+        send_reply(out, MIN((size_t)n, sizeof(out) - 1));
+    }
 }
 
 /* Runs on the system work queue, never in the USB interrupt. */
